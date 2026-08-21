@@ -120,6 +120,39 @@ export function resolveLiveLayoutMode(input: {
   );
 }
 
+export type HostWatchStreamLike = {
+  isHost?: boolean;
+  slotIndex?: number | null;
+  participantId?: string;
+  /** Studio program canvas (host + 9 boxes baked in). Never the phone host tile. */
+  isProgramComposite?: boolean;
+  /** Explicit host screen share — allowed in the host tile. */
+  isScreenShare?: boolean;
+};
+
+function isHostPrimaryStream<T extends HostWatchStreamLike>(stream: T): boolean {
+  if (stream.isHost) return true;
+  return typeof stream.slotIndex === 'number' && stream.slotIndex === 0;
+}
+
+/**
+ * Featured Host+9 / Solo tile: host camera, or host screen share.
+ * Never the Studio program composite — phone already paints the 3×3 below.
+ */
+export function pickHostWatchStream<T extends HostWatchStreamLike>(
+  streams: readonly T[] | null | undefined
+): T | null {
+  const list = (streams || []).filter((s): s is T => !!s && !s.isProgramComposite);
+  if (!list.length) return null;
+  return (
+    list.find((s) => s.isScreenShare && isHostPrimaryStream(s)) ||
+    list.find((s) => s.isHost) ||
+    list.find((s) => typeof s.slotIndex === 'number' && s.slotIndex === 0) ||
+    list[0] ||
+    null
+  );
+}
+
 export type StickySlotEntry<T> = {
   slotId: number;
   occupant: T | null;
@@ -185,14 +218,16 @@ export type HostTop9WatchLayout = {
 export function measureHostTop9WatchLayout(
   contentW: number,
   contentH: number,
-  opts?: { expanded?: boolean }
+  opts?: { expanded?: boolean; hideChat?: boolean }
 ): HostTop9WatchLayout {
   const w = Math.max(1, Math.floor(contentW || 0));
   const h = Math.max(1, Math.floor(contentH || 0));
   if (opts?.expanded) {
     return { hostH: h, gridH: 0, chatH: 0 };
   }
-  const chatH = Math.min(120, Math.max(72, Math.round(h * 0.17)));
+  const chatH = opts?.hideChat
+    ? 0
+    : Math.min(120, Math.max(72, Math.round(h * 0.17)));
   const idealHost = Math.round(w * (9 / 16));
   const maxHost = Math.round(h * 0.36);
   const minHost = Math.min(maxHost, Math.round(h * 0.22));

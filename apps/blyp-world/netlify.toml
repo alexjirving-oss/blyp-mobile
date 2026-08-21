@@ -101,6 +101,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/live/watch-presence"
+  to = "/.netlify/functions/watch-presence"
+  status = 200
+
+[[redirects]]
   from = "/api/live/overlay-feed"
   to = "/.netlify/functions/overlay-feed"
   status = 200
@@ -133,4 +138,14 @@
   for = "/downloads/*"
   [headers.values]
     Content-Disposition = "attachment"
-    Cache-Control = "no-cache"
+    Cache-Control = "public, max-age=300, must-revalidate"
+
+# Explicit PE type + filename. Does not silence Chrome Safe Browsing; unsigned
+# EXEs still get "not commonly downloaded" until Authenticode + reputation.
+[[headers]]
+  for = "/downloads/BlypTikTokCompanion-win.exe"
+  [headers.values]
+    Content-Type = "application/vnd.microsoft.portable-executable"
+    Content-Disposition = "attachment; filename=\"BlypTikTokCompanion-win.exe\""
+    Cache-Control = "public, max-age=300, must-revalidate"
+    X-Content-Type-Options = "nosniff"

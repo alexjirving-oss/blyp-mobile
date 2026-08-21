@@ -4,6 +4,7 @@
 import {
   clampOverlayBox,
   hasNativeOverlayWidgets,
+  hostTop9OverlayFlags,
   parseStudioOverlayFeedNative,
   phoneOverlayAspect,
 } from '../src/lib/studioOverlayFeedNative';
@@ -30,7 +31,7 @@ describe('parseStudioOverlayFeedNative', () => {
     expect(hasNativeOverlayWidgets(feed)).toBe(false);
   });
 
-  test('honors host flags for jukebox/gifters/goal/events only', () => {
+  test('honors host flags for every studio overlay id', () => {
     const feed = parseStudioOverlayFeedNative({
       v: 1,
       overlays: {
@@ -44,16 +45,26 @@ describe('parseStudioOverlayFeedNative', () => {
         viewers: true,
         qr: true,
       },
+      timerLabel: '01:02:03',
+      viewers: 4,
+      watchUrl: 'https://blyp.world/live/abc',
+      giftsLabel: '12 gifts',
+      chatLines: [{ name: 'Alex', text: 'hi' }],
     });
     expect(feed.overlays.jukebox).toBe(true);
     expect(feed.overlays.gifters).toBe(true);
     expect(feed.overlays.goal).toBe(true);
     expect(feed.overlays.events).toBe(true);
-    expect(feed.overlays.chat).toBe(false);
-    expect(feed.overlays.gifts).toBe(false);
-    expect(feed.overlays.timer).toBe(false);
-    expect(feed.overlays.viewers).toBe(false);
-    expect(feed.overlays.qr).toBe(false);
+    expect(feed.overlays.chat).toBe(true);
+    expect(feed.overlays.gifts).toBe(true);
+    expect(feed.overlays.timer).toBe(true);
+    expect(feed.overlays.viewers).toBe(true);
+    expect(feed.overlays.qr).toBe(true);
+    expect(feed.timerLabel).toBe('01:02:03');
+    expect(feed.viewers).toBe(4);
+    expect(feed.watchUrl).toBe('https://blyp.world/live/abc');
+    expect(feed.giftsLabel).toBe('12 gifts');
+    expect(feed.chatLines[0]).toBe('Alex: hi');
     expect(hasNativeOverlayWidgets(feed)).toBe(true);
   });
 
@@ -70,7 +81,7 @@ describe('parseStudioOverlayFeedNative', () => {
     expect(feed.jukeboxArt).toBeNull();
     expect(feed.jukeboxTitle).toBe('Track');
     expect(feed.themeCss).toBeUndefined();
-    expect(feed.chatLines).toBeUndefined();
+    expect(feed.chatLines).toEqual(['x: y']);
     expect(feed.extraUnknown).toBeUndefined();
 
     const httpsFeed = parseStudioOverlayFeedNative({
@@ -105,6 +116,25 @@ describe('parseStudioOverlayFeedNative', () => {
       { aspect: 'landscape' },
     );
     expect(land.positions.jukebox.x).toBe(70);
+  });
+});
+
+describe('hostTop9OverlayFlags', () => {
+  test('absent feed keeps Host+9 chrome on', () => {
+    const flags = hostTop9OverlayFlags(null);
+    expect(flags.gifters).toBe(true);
+    expect(flags.chat).toBe(true);
+    expect(flags.gifts).toBe(true);
+    expect(flags.goal).toBe(true);
+    expect(flags.viewers).toBe(true);
+    expect(flags.jukebox).toBe(false);
+    expect(flags.qr).toBe(false);
+  });
+
+  test('missing overlay keys keep defaults; explicit false hides chrome', () => {
+    expect(hostTop9OverlayFlags({ overlays: { gifters: false } }).gifters).toBe(false);
+    expect(hostTop9OverlayFlags({ overlays: { gifters: false } }).chat).toBe(true);
+    expect(hostTop9OverlayFlags({ overlays: { chat: true } }).chat).toBe(true);
   });
 });
 

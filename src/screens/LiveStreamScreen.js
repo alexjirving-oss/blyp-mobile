@@ -121,7 +121,7 @@ import { useLiveSafetyScanner } from '../hooks/useLiveSafetyScanner';
 import SafetyGateModal from '../components/safety/SafetyGateModal';
 import { ensureSafetyGate } from '../services/safety/ensureSafetyGate';
 import { pickPublicLabel } from '../utils/publicLabel';
-import { parseStudioOverlayFeedNative } from '../lib/studioOverlayFeedNative';
+import { hostTop9OverlayFlags, parseStudioOverlayFeedNative } from '../lib/studioOverlayFeedNative';
 import BlypCoinService from '../services/BlypCoinService';
 // Live Service for Firestore registration
 import {
@@ -3715,13 +3715,23 @@ const LiveStreamScreen = (props) => {
     return urls.slice(0, 3);
   }, [liveGuests, mergedComments]);
 
+  const studioWatchFeed = useMemo(
+    () => parseStudioOverlayFeedNative(studioOverlayFeed),
+    [studioOverlayFeed],
+  );
+  const overlayFlags = hostTop9OverlayFlags(studioOverlayFeed);
+  const showStudioGifters = overlayFlags.gifters;
+  const showStudioGoal = overlayFlags.goal;
+  const showStudioChat = overlayFlags.chat;
+  const showStudioGifts = overlayFlags.gifts;
+  const showStudioViewers = overlayFlags.viewers;
+
   const liveGoal = useMemo(() => {
-    const feed = parseStudioOverlayFeedNative(studioOverlayFeed);
     return {
-      label: feed?.goalLabel || 'Live Goal',
-      pct: Number(feed?.goalPct) || 0,
+      label: studioWatchFeed?.goalLabel || 'Live Goal',
+      pct: Number(studioWatchFeed?.goalPct) || 0,
     };
-  }, [studioOverlayFeed]);
+  }, [studioWatchFeed]);
 
   const giftAlert = useMemo(() => {
     if (!incomingGiftEvent) return null;
@@ -4064,10 +4074,14 @@ const LiveStreamScreen = (props) => {
         <StatusBar style="light" />
 
         {useHostTop9Watch ? (
+          <>
           <HostTop9WatchChrome
             topInset={LIVE_TOP_INSET}
             expanded={hostTop9Expanded}
             dailyTop3={dailyTop3}
+            showDailyTop3={showStudioGifters}
+            showChat={showStudioChat}
+            showGiftRail={showStudioGifts}
             onPressExplore={() => navigation.navigate('Rankings')}
             header={
               <LiveViewerHeader
@@ -4110,9 +4124,10 @@ const LiveStreamScreen = (props) => {
                 onError={handleViewerPlaybackError}
                 hostBandHeight={layout.hostH}
                 hostExpanded={hostTop9Expanded}
-                watchViewCount={viewCount}
-                liveGoal={liveGoal}
-                giftAlert={giftAlert}
+                watchViewCount={showStudioViewers ? viewCount : 0}
+                showWatchViewers={showStudioViewers}
+                liveGoal={showStudioGoal ? liveGoal : null}
+                giftAlert={showStudioGifts ? giftAlert : null}
                 onToggleFullscreen={() => setHostTop9Expanded((v) => !v)}
                 onHostPress={sendHeart}
               />
@@ -4132,6 +4147,13 @@ const LiveStreamScreen = (props) => {
               />
             }
           />
+          <StudioWatchOverlays
+            streamId={routeStreamId}
+            topInset={LIVE_TOP_INSET + 52}
+            bottomInset={92}
+            skipNativeChrome
+          />
+          </>
         ) : (
           <>
         {/* Bottom-anchored live chat. Host stacks chat ABOVE the guest tray;

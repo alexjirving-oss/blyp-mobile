@@ -691,10 +691,9 @@ function loadSpotifySdk(): Promise<void> {
 }
 
 let tabAudioStream: MediaStream | null = null;
-let tabCaptureBusy = false;
 
-export const TAB_AUDIO_REQUIRED =
-  "Share this Chrome tab and tick “Also share tab audio”. Without that, GO LIVE will not start while Spotify is connected.";
+/** @deprecated Tab Display Media is forbidden — Chrome share banners sit on Studio. */
+export const TAB_AUDIO_REQUIRED = "";
 
 export function rememberSpotifyLinkStatus(status: SpotifyLinkStatus | null) {
   if (status) lastLinkStatus = status;
@@ -727,111 +726,44 @@ function stopTabAudio() {
   tabAudioStream = null;
 }
 
-/**
- * Tab-audio mix for Spotify DRM. Video from this picker is stopped immediately
- * and must never become Stage video. Does not register as desk screen-share.
- */
-export async function captureStudioTabAudio(): Promise<boolean> {
-  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getDisplayMedia) {
-    emitPlayback({ error: TAB_AUDIO_REQUIRED });
-    return false;
-  }
-  if (hasStudioTabAudio() && studioAudio.attachMusicStream(tabAudioStream)) {
-    emitPlayback({ error: null });
-    return true;
-  }
-  if (tabCaptureBusy) return false;
-  tabCaptureBusy = true;
-  try {
-    const CaptureControllerCtor = (
-      window as unknown as {
-        CaptureController?: new () => {
-          setFocusBehavior: (b: string) => void;
-        };
-      }
-    ).CaptureController;
-    const opts = {
-      video: true,
-      audio: true,
-      preferCurrentTab: true,
-      selfBrowserSurface: "include",
-      systemAudio: "exclude",
-      surfaceSwitching: "exclude",
-      monitorTypeSurfaces: "exclude",
-    } as DisplayMediaStreamOptions & {
-      controller?: { setFocusBehavior: (b: string) => void };
-    };
-    if (CaptureControllerCtor) {
-      const controller = new CaptureControllerCtor();
-      try {
-        controller.setFocusBehavior("no-focus-change");
-      } catch {
-        /* ignore */
-      }
-      opts.controller = controller;
-    }
-    const stream = await navigator.mediaDevices.getDisplayMedia(opts);
-    stream.getVideoTracks().forEach((t) => {
-      try {
-        t.stop();
-      } catch {
-        /* video must never go to Stage */
-      }
-    });
-    const audio = stream.getAudioTracks().filter((t) => t.readyState === "live");
-    if (!audio.length) {
-      stream.getTracks().forEach((t) => t.stop());
-      emitPlayback({ error: TAB_AUDIO_REQUIRED });
-      return false;
-    }
-    stopTabAudio();
-    tabAudioStream = new MediaStream(audio);
-    audio[0].addEventListener("ended", () => {
-      tabAudioStream = null;
-      studioAudio.detachMusicElement();
-      if (isStudioSpotifyAudible()) {
-        emitPlayback({ error: TAB_AUDIO_REQUIRED });
-      }
-    });
-    const attached = studioAudio.attachMusicStream(tabAudioStream);
-    emitPlayback({ error: attached ? null : TAB_AUDIO_REQUIRED });
-    return attached;
-  } catch {
-    emitPlayback({ error: TAB_AUDIO_REQUIRED });
-    return false;
-  } finally {
-    tabCaptureBusy = false;
-  }
+/** Kill leftover Display Media so Chrome share banners never stick on Studio. */
+export function releaseStudioTabCapture(): void {
+  stopTabAudio();
 }
 
 /**
- * Local jukebox files mix in AudioContext (no picker).
- * Spotify IVS mix-out needs tab-share — prompt only from explicit clicks
- * (Share tab audio / GO LIVE). Play uses Web Playback SDK locally.
+ * Never getDisplayMedia. Chrome share banners exist only while tab capture
+ * is live. Local beds / files already ride the in-page Web Audio graph;
+ * Spotify Web Playback stays host-monitor (EME cannot tap DRM).
+ */
+export async function captureStudioTabAudio(): Promise<boolean> {
+  releaseStudioTabCapture();
+  if (studioAudio.isMusicPlaying() && studioAudio.currentBed()) {
+    emitPlayback({ error: null });
+    return true;
+  }
+  emitPlayback({ error: null });
+  return false;
+}
+
+/**
+ * Local jukebox files mix in AudioContext. Display Media is never used.
  */
 export async function ensureJukeboxPublishMix(opts?: {
   allowTabCapture?: boolean;
 }): Promise<boolean> {
-  if (hasStudioTabAudio() && studioAudio.attachMusicStream(tabAudioStream)) {
-    return true;
-  }
+  void opts;
+  releaseStudioTabCapture();
   if (studioAudio.isMusicPlaying() && studioAudio.currentBed()) {
     return true;
   }
-  if (opts?.allowTabCapture === false) return false;
-  return captureStudioTabAudio();
+  return false;
 }
 
-/** GO LIVE: if Spotify is connected, tab-audio must already be live or this prompts. */
+/** GO LIVE never prompts Share tab. Leftover tab capture is torn down. */
 export async function armSpotifyTabAudioForLive(): Promise<boolean> {
-  if (!lastLinkStatus) {
-    await getSpotifyLinkStatus();
-  }
-  if (!isStudioSpotifyLinked()) return true;
-  if (hasStudioTabAudio() && studioAudio.attachMusicStream(tabAudioStream)) {
-    return true;
-  }
-  return captureStudioTabAudio();
+  releaseStudioTabCapture();
+  return true;
 }
 
 async function transferToStudio(deviceId: string) {
@@ -885,9 +817,7 @@ export async function ensureStudioSpotifyPlayer(): Promise<string> {
         position: Number(state.position) || 0,
         duration: Number(state.duration) || 0,
         ...(sdkTrack ? { track: sdkTrack } : {}),
-        error: hasStudioTabAudio()
-          ? null
-          : lastPlayback.error,
+        error: lastPlayback.error,
       });
     });
     sdkPlayer.addListener("initialization_error", (e) => {
@@ -926,7 +856,6 @@ export async function ensureStudioSpotifyPlayer(): Promise<string> {
 }
 
 async function playOnStudioDevice(uris: string[], offsetUri?: string) {
-  const tabMixed = hasStudioTabAudio();
   const deviceId = await ensureStudioSpotifyPlayer();
   studioAudio.stopMusic();
   try {
@@ -946,7 +875,7 @@ async function playOnStudioDevice(uris: string[], offsetUri?: string) {
     ready: true,
     deviceId,
     paused: false,
-    error: tabMixed ? null : TAB_AUDIO_REQUIRED,
+    error: null,
   });
 }
 
@@ -975,7 +904,6 @@ export async function pauseSpotifyPlayback(): Promise<void> {
 }
 
 export async function resumeSpotifyPlayback(): Promise<void> {
-  const tabMixed = hasStudioTabAudio();
   const deviceId = await ensureStudioSpotifyPlayer();
   try {
     if (sdkPlayer) await sdkPlayer.resume();
@@ -987,7 +915,7 @@ export async function resumeSpotifyPlayback(): Promise<void> {
     }
     emitPlayback({
       paused: false,
-      error: tabMixed ? null : TAB_AUDIO_REQUIRED,
+      error: null,
     });
   } catch (e) {
     throw new Error(e instanceof Error ? e.message : "Could not resume Spotify");

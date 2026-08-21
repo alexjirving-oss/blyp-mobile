@@ -9,7 +9,8 @@ import {
   query,
   updateDoc,
   where,
-  type Unsubscribe,
+    increment,
+    type Unsubscribe,
 } from "firebase/firestore";
 import { getDb } from "./firebase";
 import { liveServiceUrl } from "./env";
@@ -847,7 +848,52 @@ export async function updateLiveSessionMeta(
   if (patch.studioOverlayFeed && typeof patch.studioOverlayFeed === "object") {
     payload.studioOverlayFeed = patch.studioOverlayFeed;
   }
-  await updateDoc(doc(db, "liveStreams", sessionId), payload);
+  await updateDoc(doc(db, "liveStreams", sessionId), payload  );
+}
+
+/**
+ * Same Firestore viewerCount path as the Android watch client
+ * (`LiveService.incrementViewer` → streams/{id} + liveStreams/{id}).
+ * Requires a signed-in Firebase user (Cognito bridge or anonymous).
+ */
+export async function incrementLiveViewer(
+  streamId: string,
+  delta: number,
+): Promise<boolean> {
+  const id = String(streamId || "").trim();
+  if (!id || !Number.isFinite(delta) || delta === 0) return false;
+  const db = getDb();
+  const payload: Record<string, unknown> = {
+    viewerCount: increment(delta),
+  };
+  if (delta > 0) payload.totalViews = increment(delta);
+  try {
+    await updateDoc(doc(db, "streams", id), payload);
+  } catch {
+    return false;
+  }
+  try {
+    const snap = await getDoc(doc(db, "streams", id));
+    const data = snap.data() || {};
+    const rawCount = typeof data.viewerCount === "number" ? data.viewerCount : 0;
+    const clamped = Math.max(0, rawCount);
+    const peak =
+      typeof data.peakViewerCount === "number" ? data.peakViewerCount : 0;
+    const corrections: Record<string, unknown> = {};
+    if (rawCount !== clamped) corrections.viewerCount = clamped;
+    if (clamped > peak) corrections.peakViewerCount = clamped;
+    if (Object.keys(corrections).length > 0) {
+      await updateDoc(doc(db, "streams", id), corrections);
+    }
+    await updateDoc(doc(db, "liveStreams", id), {
+      viewerCount: clamped,
+      ...(clamped > peak ? { peakViewerCount: clamped } : {}),
+      ...(delta > 0 ? { totalViews: increment(delta) } : {}),
+    });
+  } catch {
+    /* directory mirror is best-effort */
+  }
+  return true;
 }
 
 export type HostHistoryItem = {

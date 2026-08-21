@@ -23,6 +23,7 @@ export default function LiveViewerHeader({
   hostName = 'Host',
   hostPhotoUrl,
   viewCount = 0,
+  showViewers = true,
   heartCount = 0,
   viewerAvatars = [],
   embedded = false,
@@ -114,11 +115,13 @@ export default function LiveViewerHeader({
                   style={[styles.stackAvatar, { marginLeft: i === 0 ? 0 : -8, zIndex: 3 - i }]}
                 />
               ))}
-              <View style={styles.stackCount}>
-                <Text style={styles.stackCountText} allowFontScaling={false}>
-                  {formatCount(viewCount)}
-                </Text>
-              </View>
+              {showViewers ? (
+                <View style={styles.stackCount}>
+                  <Text style={styles.stackCountText} allowFontScaling={false}>
+                    {formatCount(viewCount)}
+                  </Text>
+                </View>
+              ) : null}
             </View>
           ) : (
             <View style={styles.statsCard}>

@@ -56,8 +56,79 @@ if (-not (Test-Path $exe)) {
 
 $destDir = Join-Path $here "..\..\apps\blyp-world\public\downloads"
 New-Item -ItemType Directory -Force -Path $destDir | Out-Null
-Copy-Item -Force $exe (Join-Path $destDir "BlypTikTokCompanion-win.exe")
-Copy-Item -Force (Join-Path $here "dist\companion.cjs") (Join-Path $destDir "companion.cjs")
+$destExe = Join-Path $destDir "BlypTikTokCompanion-win.exe"
+Copy-Item -Force $exe $destExe
 
-Get-Item $exe | Select-Object FullName, Length, LastWriteTime
-Write-Host "Copied to $destDir"
+# Optional Authenticode. There is no org code-signing cert in this repo or the
+# local cert stores. Chrome / SmartScreen WILL keep warning until a paid OV/EV
+# Authenticode cert signs this file and reputation builds. Self-signed is worse.
+$pfx = $env:BLYP_WIN_CODESIGN_PFX
+$signed = $false
+if ($pfx) {
+  if (-not (Test-Path $pfx)) {
+    Write-Error "BLYP_WIN_CODESIGN_PFX is set but the file does not exist."
+    exit 1
+  }
+  $signTool = $null
+  $cmd = Get-Command signtool -ErrorAction SilentlyContinue
+  if ($cmd) { $signTool = $cmd.Source }
+  if (-not $signTool) {
+    $kit = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+      Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
+      Sort-Object FullName -Descending |
+      Select-Object -First 1
+    if ($kit) { $signTool = $kit.FullName }
+  }
+  if (-not $signTool) {
+    Write-Error "signtool.exe not found. Install the Windows SDK, or unset BLYP_WIN_CODESIGN_PFX."
+    exit 1
+  }
+  $timestampUrl = "http://timestamp.digicert.com"
+  $pfxPass = $env:BLYP_WIN_CODESIGN_PFX_PASSWORD
+  if ($pfxPass) {
+    & $signTool sign /fd SHA256 /td SHA256 /tr $timestampUrl /f $pfx /p $pfxPass $destExe
+  } else {
+    & $signTool sign /fd SHA256 /td SHA256 /tr $timestampUrl /f $pfx $destExe
+  }
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  Copy-Item -Force $destExe $exe
+}
+
+$auth = Get-AuthenticodeSignature -FilePath $destExe
+$signed = ($auth.Status -eq "Valid")
+if (-not $signed) {
+  Write-Host "UNSIGNED ($($auth.Status)). Chrome Safe Browsing and SmartScreen will warn until a paid Authenticode cert is used. Do not treat page copy as a Chrome fix."
+}
+
+$hash = (Get-FileHash -Algorithm SHA256 -Path $destExe).Hash.ToUpperInvariant()
+$hash | Set-Content -Path (Join-Path $destDir "BlypTikTokCompanion-win.exe.sha256") -Encoding ASCII
+$bytes = (Get-Item $destExe).Length
+$metaPath = Join-Path $here "..\..\apps\blyp-world\lib\tiktokCompanionRelease.json"
+$meta = @"
+{
+  "fileName": "BlypTikTokCompanion-win.exe",
+  "downloadPath": "/downloads/BlypTikTokCompanion-win.exe",
+  "sha256": "$hash",
+  "bytes": $bytes,
+  "signed": $($signed.ToString().ToLowerInvariant())
+}
+"@
+Set-Content -Path $metaPath -Value $meta.Trim() -Encoding ASCII
+
+$readme = @"
+Blyp TikTok Companion (Windows)
+
+1. Chrome will warn because this helper is not yet Microsoft-signed.
+   Click Keep / Download suspicious file — not Delete from history.
+2. Run BlypTikTokCompanion-win.exe and leave the window open. Do not use npm.
+3. Return to https://blyp.world/live/studio and click Connect TikTok.
+
+SHA-256 $hash
+This helper is a loopback server (127.0.0.1:8765). It reads TikTok LIVE Studio
+RTMP Server URL + Stream key on this PC. It does not sign into TikTok.
+"@
+Set-Content -Path (Join-Path $destDir "README.txt") -Value $readme.Trim() -Encoding ASCII
+
+Get-Item $destExe | Select-Object FullName, Length, LastWriteTime
+Write-Host "SHA-256 $hash"
+Write-Host "Copied to $destDir (signed=$signed)"

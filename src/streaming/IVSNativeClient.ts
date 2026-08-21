@@ -216,6 +216,15 @@ export class IVSNativeClient implements LiveStreamingClient {
         const participantId = data.participantId || data.sessionId || 'local';
         const role = data.role || 'host';
         const slotIndex = data.slotIndex;
+        // Join callback is before WebRTC publish. Publish snaps Fold to earpiece —
+        // keep the same loudspeaker guard running after publish start.
+        if (role === 'guest') {
+          ;[400, 1200, 2800, 5000].forEach((ms) => {
+            setTimeout(() => {
+              this.reassertLiveLoudspeaker(`guest-publish-reassert-${ms}`);
+            }, ms);
+          });
+        }
 
         this.participants.set(participantId, {
           participantId,

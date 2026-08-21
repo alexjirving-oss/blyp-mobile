@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   beginSpotifyAuth,
-  captureStudioTabAudio,
   disconnectSpotify,
   ensureStudioSpotifyPlayer,
   listSpotifyPlaylists,
@@ -383,21 +382,6 @@ export function StudioJukeboxPanel(props: {
       {playback.error ? (
         <div className="jbx-fail" role="alert">
           <p>{playback.error}</p>
-          <button
-            type="button"
-            className="jbx-key"
-            disabled={busy}
-            onClick={() => {
-              setBusy(true);
-              void captureStudioTabAudio()
-                .then((ok) => {
-                  if (ok) onToast("Tab audio on — viewers hear Spotify");
-                })
-                .finally(() => setBusy(false));
-            }}
-          >
-            Share tab audio
-          </button>
         </div>
       ) : null}
 

@@ -373,16 +373,17 @@
 
 .tls-top {
   min-height: 52px;
-  height: auto;
+  height: 52px;
   flex-shrink: 0;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.45rem;
   padding: 0.35rem 0.85rem;
   border-bottom: 1px solid var(--blyp-line);
   background: linear-gradient(180deg, #0c0e14 0%, var(--blyp-ink) 100%);
   z-index: 4;
+  overflow: hidden;
 }
 
 .tls-top-presets {
@@ -1831,6 +1832,7 @@
   min-width: 5.5rem;
   padding: 0.4rem 0.85rem;
   font-size: 0.75rem;
+  flex-shrink: 0;
 }
 
 .tls-deck-btn {
@@ -4664,6 +4666,31 @@ a.tls-dest-companion-ttstudio {
   text-decoration: none;
 }
 
+.tls-dest-companion-chrome-note {
+  margin: 0 0 0.45rem;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--blyp-fog, #d6d6d0);
+}
+
+.tls-dest-companion-sha {
+  margin: 0 0 0.55rem;
+  font-size: 0.68rem;
+  line-height: 1.4;
+  color: var(--blyp-muted);
+}
+
+.tls-dest-companion-sha code {
+  display: block;
+  margin-top: 0.2rem;
+  padding: 0.35rem 0.45rem;
+  border-radius: 0.35rem;
+  font-size: 0.62rem;
+  word-break: break-all;
+  color: #e5eefc;
+  background: rgba(0, 0, 0, 0.35);
+}
+
 .tls-dest-paste-fallback {
   margin: 0 0 0.65rem;
   padding: 0.65rem 0.75rem;
@@ -5659,15 +5686,29 @@ button.tls-dest-card:hover {
 
 .tls-top-maximize {
   flex-shrink: 0;
-  font-size: 0.75rem;
+  font-size: 0.62rem;
   font-weight: 800;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   white-space: nowrap;
+  padding: 0.14rem 0.42rem;
+  line-height: 1.15;
 }
 
 .tls-top-maximize-on {
   color: var(--blyp-coral);
   border-color: rgba(255, 77, 109, 0.45);
   background: rgba(255, 77, 109, 0.1);
+}
+
+.tls-fs-chrome-note {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0.28rem 0.85rem 0.34rem;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  font-weight: 600;
+  color: var(--blyp-muted);
+  background: #0c0e14;
+  border-bottom: 1px solid var(--blyp-line);
 }

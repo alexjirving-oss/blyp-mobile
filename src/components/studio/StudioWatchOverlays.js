@@ -14,6 +14,8 @@ import {
   phoneWidgetScale,
 } from '../../lib/studioOverlayFeedNative';
 
+const HOST_TOP9_NATIVE_IDS = ['gifters', 'goal'];
+
 const TEAL = '#FF2D55';
 
 function OverlayItem({ pos, layer, children, style }) {
@@ -65,7 +67,12 @@ function jukeboxCopy(feed) {
   return { title, artist, next: feed.jukeboxNext || '', art: feed.jukeboxArt };
 }
 
-export default function StudioWatchOverlays({ streamId, topInset = 0, bottomInset = 0 }) {
+export default function StudioWatchOverlays({
+  streamId,
+  topInset = 0,
+  bottomInset = 0,
+  skipNativeChrome = false,
+}) {
   const { width: winW, height: winH } = useWindowDimensions();
   const aspect = phoneOverlayAspect(winW, winH);
   const [rawFeed, setRawFeed] = useState(null);
@@ -109,8 +116,11 @@ export default function StudioWatchOverlays({ streamId, topInset = 0, bottomInse
   );
   const copy = useMemo(() => (feed ? jukeboxCopy(feed) : null), [feed]);
   const ready = layer.w > 1 && layer.h > 1;
+  const omit = skipNativeChrome ? HOST_TOP9_NATIVE_IDS : null;
+  const show = (id) =>
+    !!(ready && feed?.overlays?.[id] === true && !(omit || []).includes(id));
 
-  if (!feed || !hasNativeOverlayWidgets(feed)) return null;
+  if (!feed || !hasNativeOverlayWidgets(feed, omit)) return null;
 
   return (
     <View
@@ -123,7 +133,7 @@ export default function StudioWatchOverlays({ streamId, topInset = 0, bottomInse
         }
       }}
     >
-      {ready && feed.overlays.gifters ? (
+      {ready && show('gifters') ? (
         <OverlayItem pos={feed.positions.gifters} layer={layer} style={styles.gifters}>
           <Text style={styles.title} allowFontScaling={false}>
             Top gifters
@@ -136,7 +146,7 @@ export default function StudioWatchOverlays({ streamId, topInset = 0, bottomInse
         </OverlayItem>
       ) : null}
 
-      {ready && feed.overlays.goal ? (
+      {ready && show('goal') ? (
         <OverlayItem pos={feed.positions.goal} layer={layer} style={styles.goal}>
           <Text style={styles.title} numberOfLines={1} allowFontScaling={false}>
             {feed.goalLabel}
@@ -147,7 +157,7 @@ export default function StudioWatchOverlays({ streamId, topInset = 0, bottomInse
         </OverlayItem>
       ) : null}
 
-      {ready && feed.overlays.jukebox && copy ? (
+      {ready && show('jukebox') && copy ? (
         <OverlayItem pos={feed.positions.jukebox} layer={layer} style={styles.jukebox}>
           <View style={styles.jbxRow}>
             {copy.art ? (
@@ -177,7 +187,7 @@ export default function StudioWatchOverlays({ streamId, topInset = 0, bottomInse
         </OverlayItem>
       ) : null}
 
-      {ready && feed.overlays.events ? (
+      {ready && show('events') ? (
         <OverlayItem pos={feed.positions.events} layer={layer} style={styles.events}>
           <Text style={styles.title} allowFontScaling={false}>
             Recent
@@ -193,6 +203,28 @@ export default function StudioWatchOverlays({ streamId, topInset = 0, bottomInse
               </Text>
             ))
           )}
+        </OverlayItem>
+      ) : null}
+
+      {ready && show('timer') ? (
+        <OverlayItem pos={feed.positions.timer} layer={layer} style={styles.timer}>
+          <Text style={styles.kicker} allowFontScaling={false}>
+            Live
+          </Text>
+          <Text style={styles.timerText} allowFontScaling={false}>
+            {feed.timerLabel}
+          </Text>
+        </OverlayItem>
+      ) : null}
+
+      {ready && show('qr') && feed.watchUrl ? (
+        <OverlayItem pos={feed.positions.qr} layer={layer} style={styles.qr}>
+          <Text style={styles.title} allowFontScaling={false}>
+            Watch
+          </Text>
+          <Text style={styles.row} numberOfLines={2} allowFontScaling={false}>
+            {feed.watchUrl.replace(/^https:\/\//i, '')}
+          </Text>
         </OverlayItem>
       ) : null}
     </View>
@@ -299,5 +331,26 @@ const styles = StyleSheet.create({
   },
   events: {
     width: 156,
+  },
+  chat: {
+    width: 156,
+  },
+  gifts: {
+    width: 148,
+  },
+  timer: {
+    width: 92,
+  },
+  viewers: {
+    width: 88,
+  },
+  qr: {
+    width: 148,
+  },
+  timerText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '800',
+    marginTop: 2,
   },
 });

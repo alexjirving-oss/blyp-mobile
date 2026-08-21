@@ -77,6 +77,7 @@ import {
   buildVisibleGuestSlotIds,
   guestTileWidthPercent,
   guestTileHorizontalMarginPercent,
+  pickHostWatchStream,
 } from '../live/ivs/multiGuestLayout';
 
 const GUEST_TRAY_LAYOUT_ANIM = {
@@ -112,6 +113,7 @@ const LiveStreamViewer = ({
   watchViewCount = 0,
   liveGoal = null,
   giftAlert = null,
+  showWatchViewers = true,
   onToggleFullscreen,
   onHostPress,
 }) => {
@@ -136,6 +138,7 @@ const LiveStreamViewer = ({
         watchViewCount={watchViewCount}
         liveGoal={liveGoal}
         giftAlert={giftAlert}
+        showWatchViewers={showWatchViewers}
         onToggleFullscreen={onToggleFullscreen}
         onHostPress={onHostPress}
       />
@@ -166,6 +169,7 @@ const IVSLiveStreamViewer = ({
   watchViewCount = 0,
   liveGoal = null,
   giftAlert = null,
+  showWatchViewers = true,
   onToggleFullscreen,
   onHostPress,
 }) => {
@@ -854,7 +858,7 @@ const IVSLiveStreamViewer = ({
   const guestStreamCount = useMemo(() => {
     const streams = ivsSession.visibleStreams || [];
     if (streams.length <= 1) return 0;
-    const host = streams.find((s) => s?.isHost) || streams[0] || null;
+    const host = pickHostWatchStream(streams);
     return streams.filter(
       (s) => s && s !== host && (!host || !s.participantId || s.participantId !== host.participantId)
     ).length;
@@ -1236,11 +1240,9 @@ const IVSLiveStreamViewer = ({
 
     const renderableStreams = ivsSession.visibleStreams || [];
 
-    const hostStream =
-      renderableStreams.find((s) => s?.isHost) ||
-      renderableStreams.find((s) => typeof s?.slotIndex === 'number' && s.slotIndex === 0) ||
-      renderableStreams[0] ||
-      null;
+    // Host+9 featured tile = host camera (or host screen share), never the
+    // Studio program composite that already paints the 9 guest boxes.
+    const hostStream = pickHostWatchStream(renderableStreams);
 
     // Exclude host both by object identity AND participantId so duplicates can't
     // render as multiple guest tiles.
@@ -1249,6 +1251,7 @@ const IVSLiveStreamViewer = ({
         s &&
         s !== hostStream &&
         !s.isHost &&
+        !s.isProgramComposite &&
         !(typeof s.slotIndex === 'number' && s.slotIndex === 0) &&
         (!hostStream || !s.participantId || s.participantId !== hostStream.participantId),
     );
@@ -1759,6 +1762,7 @@ const IVSLiveStreamViewer = ({
                     : StyleSheet.absoluteFill
             }
           >
+            {/* Host+9 featured surface is slot 0 host camera/screen. The 3×3 is a sibling below. */}
             {hostStream ? (
               <NativeIVSRealTimeView
                 collapsable={false}
@@ -1796,19 +1800,21 @@ const IVSLiveStreamViewer = ({
                     onPress={onHostPress}
                   />
                 ) : null}
+                {liveGoal ? (
                 <View style={styles.hostTop9Goal} pointerEvents="none">
                   <Text style={styles.hostTop9GoalLabel} numberOfLines={1} allowFontScaling={false}>
-                    {liveGoal?.label || 'Live Goal'}
+                    {liveGoal.label || 'Live Goal'}
                   </Text>
                   <View style={styles.hostTop9GoalTrack}>
                     <View
                       style={[
                         styles.hostTop9GoalFill,
-                        { width: `${Math.min(100, Math.max(0, Number(liveGoal?.pct) || 0))}%` },
+                        { width: `${Math.min(100, Math.max(0, Number(liveGoal.pct) || 0))}%` },
                       ]}
                     />
                   </View>
                 </View>
+                ) : null}
                 {giftAlert?.name ? (
                   <View style={styles.hostTop9GiftPill} pointerEvents="none">
                     <Text style={styles.hostTop9GiftPillText} numberOfLines={1} allowFontScaling={false}>
@@ -1817,12 +1823,14 @@ const IVSLiveStreamViewer = ({
                   </View>
                 ) : null}
                 <View style={styles.hostTop9HostMeta} pointerEvents="box-none">
+                  {showWatchViewers ? (
                   <View style={styles.hostTop9Eye} pointerEvents="none">
                     <Icon name="eye" size={12} color="#fff" />
                     <Text style={styles.hostTop9EyeText} allowFontScaling={false}>
                       {Number(watchViewCount) || 0}
                     </Text>
                   </View>
+                  ) : null}
                   {typeof onToggleFullscreen === 'function' ? (
                     <TouchableOpacity
                       style={styles.hostTop9Fs}

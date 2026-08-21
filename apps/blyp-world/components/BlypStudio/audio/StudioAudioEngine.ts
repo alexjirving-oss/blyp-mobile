@@ -71,16 +71,7 @@ const mixListeners = new Set<(wantMix: boolean) => void>();
 
 function nativeVideoTrack(videoFrom: MediaStream): MediaStreamTrack | null {
   return (
-    videoFrom.getVideoTracks().find((t) => {
-      if (t.readyState !== "live") return false;
-      const settings = t.getSettings?.() ?? {};
-      if (settings.deviceId || settings.displaySurface || settings.facingMode) {
-        return true;
-      }
-      const label = t.label || "";
-      if (/canvas/i.test(label)) return false;
-      return /screen|display|window|web-contents/i.test(label);
-    }) ?? null
+    videoFrom.getVideoTracks().find((t) => t.readyState === "live") ?? null
   );
 }
 
@@ -476,8 +467,8 @@ export const studioAudio = {
   },
 
   /**
-   * Camera/screen + getUserMedia mic. Same capture clock — no Web Audio dest.
-   * Use this unless a bed/file/tab-share is actually on the mix.
+   * Camera/screen/canvas video + getUserMedia mic. Same capture clock — no Web Audio dest.
+   * Use this unless a bed/file is actually on the mix.
    */
   buildNativePublishStream(
     videoFrom: MediaStream,
@@ -493,9 +484,8 @@ export const studioAudio = {
   },
 
   /**
-   * Stage publish: camera/screen video + mix audio (mic + jukebox).
+   * Stage publish: program video + mix audio (mic + jukebox).
    * Only uses the Web Audio dest when music is actually attached/playing.
-   * Never put canvas capture on this stream.
    */
   buildPublishStream(
     videoFrom: MediaStream,

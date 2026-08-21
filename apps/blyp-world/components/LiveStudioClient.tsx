@@ -78,10 +78,11 @@ import {
 import {
   consumeStudioFullscreenIntent,
   exitStudioFullscreen,
-  isStudioMaximized,
+  isNativeStudioFullscreen,
   requestStudioFullscreen,
   setStudioMaximizedClass,
   STUDIO_MAXIMIZED_CLASS,
+  subscribeStudioFullscreenChange,
 } from "@/lib/enterLiveStudio";
 import { ConfidenceRail } from "./studio/ConfidenceRail";
 import { DestinationDock } from "./studio/DestinationDock";
@@ -97,8 +98,9 @@ import {
   installStudioCamLock,
   listVideoInputDevices,
   mediaStreamHasLiveVideo,
-  nativePublishVideoTrack,
+  livePublishVideoTrack,
   openDeskMedia,
+  releaseStudioDisplayCapture,
   resolveLiveVideoDeviceId,
   resolveStudioCameras,
   screenStreamIsLive,
@@ -184,6 +186,18 @@ function isDisplayCaptureStream(stream: MediaStream | null | undefined): boolean
   );
 }
 
+function isScreenDeskMode(mode: DeskMediaMode | undefined | null): boolean {
+  return mode === "screen" || mode === "screen-pip";
+}
+
+/** Fullscreen must not steal the gesture getDisplayMedia needs. */
+function clickNeedsUserActivation(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  return !!target.closest(
+    "button, a, input, select, textarea, [role='menuitem'], [role='menuitemradio'], [role='menu']",
+  );
+}
+
 function streamDeviceId(stream: MediaStream | null | undefined): string | null {
   const id = stream?.getVideoTracks()[0]?.getSettings()?.deviceId;
   return id ? String(id) : null;
@@ -250,16 +264,18 @@ import {
 } from "@/lib/studioProgramScenes";
 import { planPublishAudio } from "@/lib/studioPublishGraph";
 import {
-  armSpotifyTabAudioForLive,
   completeSpotifyAuthFromUrl,
   ensureJukeboxPublishMix,
   getSpotifyLinkStatus,
-  isStudioSpotifyLinked,
   pauseSpotifyPlayback,
+  releaseStudioTabCapture,
   rememberSpotifyLinkStatus,
-  TAB_AUDIO_REQUIRED,
   type SpotifyLinkStatus,
 } from "@/lib/studioSpotify";
+import {
+  buildProgramPublishStream,
+  getOrCreateStudioProgramComposite,
+} from "@/lib/studioProgramComposite";
 import { StudioJukeboxPanel, type JukeboxNowInfo } from "@/components/StudioJukeboxPanel";
 import {
   listTtsVoices,
@@ -751,7 +767,7 @@ export function LiveStudioClient() {
     idToken: string;
   } | null>(null);
   const boothRootRef = useRef<HTMLDivElement | null>(null);
-  const maximizeNativeRef = useRef(false);
+  const wantStudioFullscreenRef = useRef(true);
   const [studioMaximized, setStudioMaximized] = useState(false);
 
   const [spotifyStatus, setSpotifyStatus] = useState<SpotifyLinkStatus | null>(
@@ -832,51 +848,51 @@ export function LiveStudioClient() {
     kickStreamKey,
   };
 
-  useEffect(() => {
-    if (loading) return;
-    const root = boothRootRef.current;
-    if (!root) return;
-    if (!consumeStudioFullscreenIntent()) return;
-    setStudioMaximizedClass(true, root);
-    setStudioMaximized(true);
-    void requestStudioFullscreen(root);
-  }, [loading]);
+  const applyStudioFullscreenLayout = useCallback((on: boolean) => {
+    setStudioMaximizedClass(on, boothRootRef.current);
+    setStudioMaximized(on);
+  }, []);
+
+  const armAndRequestStudioFullscreen = useCallback(() => {
+    wantStudioFullscreenRef.current = true;
+    void requestStudioFullscreen(boothRootRef.current);
+  }, []);
 
   useEffect(() => {
-    const syncMaximized = () => {
-      const root = boothRootRef.current;
-      if (!root) return;
-      if (document.fullscreenElement === root) {
-        maximizeNativeRef.current = true;
-        setStudioMaximizedClass(true, root);
-        setStudioMaximized(true);
-        return;
-      }
-      if (maximizeNativeRef.current) {
-        maximizeNativeRef.current = false;
-        setStudioMaximizedClass(false, root);
-        setStudioMaximized(false);
-      }
+    consumeStudioFullscreenIntent();
+    applyStudioFullscreenLayout(isNativeStudioFullscreen());
+  }, [loading, applyStudioFullscreenLayout]);
+
+  useEffect(() => {
+    return subscribeStudioFullscreenChange(() => {
+      applyStudioFullscreenLayout(isNativeStudioFullscreen());
+    });
+  }, [applyStudioFullscreenLayout]);
+
+  useEffect(() => {
+    const tryEnter = (ev: PointerEvent) => {
+      if (!wantStudioFullscreenRef.current) return;
+      if (isNativeStudioFullscreen()) return;
+      // Capture-phase fullscreen on every click consumed getDisplayMedia.
+      if (clickNeedsUserActivation(ev.target)) return;
+      void requestStudioFullscreen(boothRootRef.current);
     };
-    document.addEventListener("fullscreenchange", syncMaximized);
-    return () => document.removeEventListener("fullscreenchange", syncMaximized);
+    document.addEventListener("pointerdown", tryEnter, true);
+    return () => document.removeEventListener("pointerdown", tryEnter, true);
   }, []);
 
   const toggleStudioMaximize = useCallback(async () => {
     const root = boothRootRef.current;
-    if (!root) return;
-    const maximized = isStudioMaximized(root);
-    if (maximized) {
-      maximizeNativeRef.current = false;
+    if (isNativeStudioFullscreen()) {
+      wantStudioFullscreenRef.current = false;
       await exitStudioFullscreen(root);
-      setStudioMaximized(false);
+      applyStudioFullscreenLayout(false);
       return;
     }
-    setStudioMaximizedClass(true, root);
-    setStudioMaximized(true);
-    await requestStudioFullscreen(root);
-    maximizeNativeRef.current = document.fullscreenElement === root;
-  }, []);
+    wantStudioFullscreenRef.current = true;
+    const ok = await requestStudioFullscreen(root);
+    applyStudioFullscreenLayout(ok);
+  }, [applyStudioFullscreenLayout]);
 
   /** First paint guard — portrait never opens as Solo from stale storage/deck echo. */
   useEffect(() => {
@@ -963,8 +979,10 @@ export function LiveStudioClient() {
     studioAudio.setStingMonitorEnabled(hearAlertsLocal);
   }, [hearAlertsLocal]);
 
-  /** Kill stale toast/error from a previous visit before any open attempt. */
+  /** Kill stale toast/error and leftover tab capture before any open attempt. */
   useEffect(() => {
+    releaseStudioTabCapture();
+    releaseStudioDisplayCapture();
     setError(null);
     setToast(null);
     setGumDebug({ status: "idle" });
@@ -1058,27 +1076,46 @@ export function LiveStudioClient() {
       setPublishState("publishing");
       setError(null);
       try {
-        const resolved = mode || mediaRef.current?.mode || mediaMode;
+        releaseStudioTabCapture();
         const resolvedOrient = orient || orientation;
         const existing = mediaRef.current;
+        const liveScreen = liveScreenFromMedia();
+        const publishMode: DeskMediaMode =
+          mode || existing?.mode || mediaMode;
         const reopenMedia =
-          !existing ||
-          (mode && existing.mode !== mode) ||
-          (existing.mode !== "camera" && existing.orientation !== resolvedOrient);
+          !mediaRef.current ||
+          mediaRef.current.mode !== publishMode ||
+          (mediaRef.current.mode !== "camera" &&
+            mediaRef.current.orientation !== resolvedOrient);
         if (reopenMedia) {
-          existing?.stop();
-          mediaRef.current = await openDeskMedia(
-            resolved,
+          const prev = mediaRef.current;
+          const next = await openDeskMedia(
+            publishMode,
             resolvedOrient,
-            null,
+            isScreenDeskMode(publishMode) || publishMode === "camera-pip"
+              ? liveScreen
+              : null,
             cameraDeviceId,
           );
-        } else if (existing.orientation !== resolvedOrient) {
-          existing.orientation = resolvedOrient;
+          if (prev && prev !== next) {
+            prev.stop({
+              keepCamera:
+                publishMode === "camera" || publishMode === "camera-pip",
+              keepScreen:
+                isScreenDeskMode(publishMode) || publishMode === "camera-pip",
+            });
+          }
+          mediaRef.current = next;
+        } else if (mediaRef.current && mediaRef.current.orientation !== resolvedOrient) {
+          mediaRef.current.orientation = resolvedOrient;
         }
         const media = mediaRef.current;
         if (!media) {
-          throw new Error("Could not open camera or screen");
+          throw new Error(
+            isScreenDeskMode(publishMode)
+              ? "Could not open screen share"
+              : "Could not open camera",
+          );
         }
         if (videoRef.current) {
           void bindProgramVideo(videoRef.current, media.previewStream).catch(
@@ -1088,28 +1125,19 @@ export function LiveStudioClient() {
           );
         }
         setPreviewOn(true);
-        setMediaMode(resolved);
+        setMediaMode(publishMode);
         await ensureJukeboxPublishMix({ allowTabCapture: false });
-        const videoSource = media.publishStream || media.previewStream;
+        studioAudio.attachMic(media.previewStream);
         const wantMix = studioAudio.shouldPublishMix();
-        const publishStream =
-          (wantMix
-            ? studioAudio.buildPublishStream(videoSource, media.previewStream)
-            : studioAudio.buildNativePublishStream(
-                videoSource,
-                media.previewStream,
-              )) || videoSource;
-        const liveVideo = nativePublishVideoTrack(publishStream);
+        const mixAudio = studioAudio.mixAudioTrack();
+        const gum = studioAudio.nativeAudioTrack(media.previewStream);
+        const audio =
+          wantMix && mixAudio && mixAudio.readyState === "live" ? mixAudio : gum;
+        const composite = getOrCreateStudioProgramComposite(resolvedOrient);
+        const publishStream = buildProgramPublishStream(composite, media, audio);
+        const liveVideo = livePublishVideoTrack(publishStream);
         if (!liveVideo) {
-          throw new Error("Could not open camera or screen");
-        }
-        if (resolved === "camera") {
-          const settings = liveVideo.getSettings?.() ?? {};
-          if (!settings.deviceId) {
-            throw new Error(
-              "Camera publish requires a getUserMedia video track",
-            );
-          }
+          throw new Error("Could not capture studio program");
         }
         const handle = await startIvsWebHostPublish({
           participantToken: host.hostToken,
@@ -1122,18 +1150,16 @@ export function LiveStudioClient() {
         publishRef.current = handle;
         setPublishState("live");
         applyPublishAudio(studioAudio.shouldPublishMix());
-        pushToast(
-          resolved === "screen" || resolved === "screen-pip"
-            ? "Screen publishing to stage"
-            : "Camera publishing to stage",
-        );
+        pushToast("Studio publishing to stage");
         return true;
       } catch (e) {
         setPublishState("error");
         setError(
           e instanceof Error
             ? e.message
-            : "Failed to publish camera to IVS stage",
+            : isScreenDeskMode(mode || mediaMode)
+              ? "Failed to publish screen to IVS stage"
+              : "Failed to publish camera to IVS stage",
         );
         return false;
       } finally {
@@ -2260,11 +2286,7 @@ export function LiveStudioClient() {
         setError(SESSION_EXPIRED_MSG);
         return;
       }
-      const tabAudioOk = await armSpotifyTabAudioForLive();
-      if (isStudioSpotifyLinked() && !tabAudioOk) {
-        setError(TAB_AUDIO_REQUIRED);
-        return;
-      }
+      releaseStudioTabCapture();
       await ensureFirebaseFromCognito({
         cognitoIdToken: idToken,
         uid: sub,
@@ -2456,8 +2478,22 @@ export function LiveStudioClient() {
       requireAuth("Log in to go LIVE");
       return;
     }
+    // Screen/tab capture must win this click. requestFullscreen consumes
+    // transient user activation and Chrome can end an active DisplayMedia track.
+    const screenPublish =
+      isScreenDeskMode(mediaMode) ||
+      (mediaMode === "camera-pip" && pipSource === "screen");
+    if (!screenPublish) {
+      armAndRequestStudioFullscreen();
+    }
     void onStartRef.current();
-  }, [session, requireAuth]);
+  }, [
+    session,
+    requireAuth,
+    armAndRequestStudioFullscreen,
+    mediaMode,
+    pipSource,
+  ]);
 
   const prepareLiveFanout = useCallback(
     async (dests: BroadcastPrepareDest[]) => {
@@ -2648,6 +2684,13 @@ export function LiveStudioClient() {
   );
 
   const attachPreview = useCallback((media: DeskMediaHandle) => {
+    try {
+      getOrCreateStudioProgramComposite(media.orientation).setDeskStream(
+        media.previewStream,
+      );
+    } catch {
+      /* composite is publish-only; preview still binds <video> */
+    }
     const stream = media.previewStream;
     const live = mediaStreamHasLiveVideo(stream);
     // gum already succeeded — never leave the "No preview" overlay.
@@ -2725,7 +2768,8 @@ export function LiveStudioClient() {
       }
       try {
         let next: DeskMediaHandle;
-        if (resolved === "camera") {
+        const previewMode: DeskMediaMode = resolved;
+        if (previewMode === "camera") {
           const prev = mediaRef.current;
           if (
             liveCameraMatchesDevice(prev, cameraDeviceId) &&
@@ -2754,7 +2798,12 @@ export function LiveStudioClient() {
             );
           }
         } else {
-          next = await openDeskMedia(resolved, resolvedOrient, null, null);
+          next = await openDeskMedia(
+            previewMode,
+            resolvedOrient,
+            null,
+            cameraDeviceId,
+          );
         }
         if (openGen !== previewOpenGenRef.current) {
           // Newer open owns preview — do not stop a live cam we just acquired.
@@ -2762,23 +2811,30 @@ export function LiveStudioClient() {
         }
         const prev = mediaRef.current;
         mediaRef.current = next;
-        if (prev && prev !== next && prev.mode !== "camera") {
+        if (prev && prev !== next) {
           try {
-            prev.stop({ keepCamera: true });
+            prev.stop({
+              keepCamera:
+                previewMode === "camera" || previewMode === "camera-pip",
+              keepScreen:
+                isScreenDeskMode(previewMode) || previewMode === "camera-pip",
+            });
           } catch {
             /* ignore */
           }
         }
         attachPreview(next);
-        setMediaMode(resolved);
+        setMediaMode(previewMode);
         const liveId = next.previewStream.getVideoTracks()[0]?.getSettings()
           ?.deviceId;
         if (liveId) setCameraDeviceId(liveId);
-        if (resolved === "camera") {
-          setMainSource((prev) =>
-            prev === "phone" || prev === "other" ? prev : "laptop",
+        if (previewMode === "camera") {
+          setMainSource((prevSource) =>
+            prevSource === "phone" || prevSource === "other" ? prevSource : "laptop",
           );
           setPipOn(false);
+        } else if (isScreenDeskMode(previewMode)) {
+          setMainSource("screen");
         }
         setMicMuted(false);
         setCamOff(false);
@@ -2802,9 +2858,16 @@ export function LiveStudioClient() {
           setMainSource("laptop");
         }
         if (name === "NotAllowedError" || /Permission|NotAllowed/i.test(raw)) {
-          setError(`${banner} — tap anywhere to enable the camera`);
-          armGesturePreview(resolved, resolvedOrient);
-          autoPreviewStartedRef.current = true;
+          if (isScreenDeskMode(resolved)) {
+            setError(
+              `${banner} — screen share was cancelled or blocked. Camera was not used.`,
+            );
+            autoPreviewStartedRef.current = true;
+          } else {
+            setError(`${banner} — tap anywhere to enable the camera`);
+            armGesturePreview(resolved, resolvedOrient);
+            autoPreviewStartedRef.current = true;
+          }
         } else {
           setError(banner);
           autoPreviewStartedRef.current = false;
@@ -3096,10 +3159,14 @@ export function LiveStudioClient() {
         deviceId = preferredDevice ?? deviceFor(main);
       }
 
-      setMainSource(main);
-      setPipOn(pip);
-      setPipSource(pipKind);
-      setMediaMode(mode);
+      const commitProgramSource = () => {
+        setMainSource(main);
+        setPipOn(pip);
+        setPipSource(pipKind);
+        setMediaMode(mode);
+        setMicMuted(false);
+        setCamOff(false);
+      };
 
       const openNext = async () => {
         previewOpenGenRef.current += 1;
@@ -3115,15 +3182,28 @@ export function LiveStudioClient() {
           }
           pipArg = { kind: "camera", deviceId: safePip };
         }
-        mediaRef.current = await openDeskMedia(
+        const prev = mediaRef.current;
+        const next = await openDeskMedia(
           mode,
           orientation,
           reuseScreen,
           safeId,
           pipArg,
         );
-        attachPreview(mediaRef.current);
-        studioAudio.attachMic(mediaRef.current.previewStream);
+        if (prev && prev !== next) {
+          try {
+            prev.stop({
+              keepCamera: mode === "camera" || mode === "camera-pip",
+              keepScreen:
+                isScreenDeskMode(mode) || mode === "camera-pip",
+            });
+          } catch {
+            /* ignore */
+          }
+        }
+        mediaRef.current = next;
+        attachPreview(next);
+        studioAudio.attachMic(next.previewStream);
         setError(null);
         setGumDebug(getLastGumDebug());
       };
@@ -3133,7 +3213,6 @@ export function LiveStudioClient() {
         setError(null);
         try {
           const live = mediaRef.current;
-          const keepCam = mode === "camera" || mode === "camera-pip";
           if (
             mode === "camera" &&
             live &&
@@ -3141,32 +3220,12 @@ export function LiveStudioClient() {
           ) {
             attachPreview(live);
           } else {
-            if (live) {
-              try {
-                live.stop({
-                  keepCamera: keepCam,
-                  keepScreen: !!reuseScreen,
-                });
-              } catch {
-                /* ignore */
-              }
-              mediaRef.current = null;
-            }
             await openNext();
           }
-          setMicMuted(false);
-          setCamOff(false);
+          commitProgramSource();
         } catch (e) {
           setGumDebug(getLastGumDebug());
           setError(formatStudioCamOpenError(e));
-          setPipOn(false);
-          if (!mediaRef.current) {
-            try {
-              await startPreview("camera", orientation);
-            } catch {
-              /* already reported */
-            }
-          }
         } finally {
           setBusy(false);
         }
@@ -3183,7 +3242,6 @@ export function LiveStudioClient() {
       try {
         await stopPublish();
         const live = mediaRef.current;
-        const keepCam = mode === "camera" || mode === "camera-pip";
         if (
           mode === "camera" &&
           live &&
@@ -3191,31 +3249,13 @@ export function LiveStudioClient() {
         ) {
           attachPreview(live);
         } else {
-          if (live) {
-            try {
-              live.stop({
-                keepCamera: keepCam,
-                keepScreen: !!reuseScreen,
-              });
-            } catch {
-              /* ignore */
-            }
-            mediaRef.current = null;
-          }
           await openNext();
         }
+        commitProgramSource();
         await beginPublish(active, mode, orientation);
       } catch (e) {
         setGumDebug(getLastGumDebug());
         setError(formatStudioCamOpenError(e));
-        setPipOn(false);
-        if (!mediaRef.current) {
-          try {
-            await startPreview("camera", orientation);
-          } catch {
-            /* already reported */
-          }
-        }
       } finally {
         setBusy(false);
       }
@@ -3234,7 +3274,6 @@ export function LiveStudioClient() {
       pushToast,
       requireAuth,
       session,
-      startPreview,
       stopPublish,
     ],
   );
@@ -3867,6 +3906,7 @@ export function LiveStudioClient() {
           className="tls-logo"
           aria-label="blyp home"
           onClick={() => {
+            wantStudioFullscreenRef.current = false;
             void exitStudioFullscreen(boothRootRef.current);
             setStudioMaximized(false);
           }}
@@ -3886,49 +3926,15 @@ export function LiveStudioClient() {
           title={
             studioMaximized
               ? "Exit full screen (Esc)"
-              : "Maximize studio to full screen"
+              : "Full screen hides Chrome tabs and the address bar. Click required; browsers block it on load."
           }
           onClick={() => void toggleStudioMaximize()}
         >
-          {studioMaximized ? "Exit full screen" : "Maximize"}
+          {studioMaximized ? "Exit" : "Maximize"}
         </button>
         <span className={isLive ? "tls-badge tls-badge-live" : "tls-badge"}>
           {isLive ? "LIVE" : "Offline"}
         </span>
-        <div
-          className="tls-orient-seg"
-          role="group"
-          aria-label="Program aspect"
-          title="← / → cycle booth"
-        >
-          <button
-            type="button"
-            className={
-              boothMode === "portrait"
-                ? "tls-orient-seg-btn tls-orient-seg-on"
-                : "tls-orient-seg-btn"
-            }
-            aria-pressed={boothMode === "portrait"}
-            onClick={() => applyBoothMode("portrait")}
-          >
-            PORTRAIT
-          </button>
-          <button
-            type="button"
-            className={
-              boothMode === "landscape"
-                ? "tls-orient-seg-btn tls-orient-seg-on"
-                : "tls-orient-seg-btn"
-            }
-            aria-pressed={boothMode === "landscape"}
-            onClick={() => applyBoothMode("landscape")}
-          >
-            LANDSCAPE
-          </button>
-          {boothMode === "team-desk" ? (
-            <span className="tls-orient-seg-note">Team desk</span>
-          ) : null}
-        </div>
         <div className="tls-health" aria-label="Connection health">
           <span className="tls-health-item">
             {healthFps || "—"}
@@ -4060,11 +4066,6 @@ export function LiveStudioClient() {
             </div>
           ) : null}
         </div>
-        {strikeArmed ? (
-          <span className="tls-monitor-armed" role="status">
-            Nuke armed
-          </span>
-        ) : null}
         <p className="tls-go-summary" role="status">
           {goLiveSummary}
         </p>
@@ -5539,6 +5540,7 @@ export function LiveStudioClient() {
                         type="button"
                         className="tls-preview-btn"
                         onClick={() => {
+                          armAndRequestStudioFullscreen();
                           setError(null);
                           setCamOff(false);
                           setMainSource("laptop");

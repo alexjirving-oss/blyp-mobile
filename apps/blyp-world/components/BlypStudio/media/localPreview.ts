@@ -56,6 +56,8 @@ export async function startScreenShare(): Promise<LocalPreviewHandle> {
   const stream = await navigator.mediaDevices.getDisplayMedia({
     video: { frameRate: { ideal: 30 } },
     audio: false,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ...({ selfBrowserSurface: "exclude", preferCurrentTab: false } as any),
   });
   return {
     stream,

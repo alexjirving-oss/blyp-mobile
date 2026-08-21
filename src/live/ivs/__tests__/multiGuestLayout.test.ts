@@ -12,6 +12,7 @@ import {
   layoutUsesBottomTray,
   guestBoxesForLayout,
   measureHostTop9WatchLayout,
+  pickHostWatchStream,
   MAX_GUEST_SLOTS,
 } from '../multiGuestLayout';
 
@@ -96,6 +97,18 @@ describe('multiGuestLayout sticky slots', () => {
     expect(mapStudioLayoutToLiveLayoutMode('host-top-9')).toBe(DEFAULT_LIVE_LAYOUT_MODE);
   });
 
+  it('binds the featured tile to host camera/screen, never the program composite', () => {
+    const composite = { participantId: 'program', isHost: true, isProgramComposite: true, slotIndex: 0 };
+    const camera = { participantId: 'cam', isHost: true, slotIndex: 0 };
+    const screen = { participantId: 'scr', isHost: true, isScreenShare: true, slotIndex: 0 };
+    const guest = { participantId: 'g1', slotIndex: 1 };
+    expect(pickHostWatchStream([composite, camera, guest])?.participantId).toBe('cam');
+    expect(pickHostWatchStream([composite, screen, camera])?.participantId).toBe('scr');
+    expect(pickHostWatchStream([guest, camera])?.participantId).toBe('cam');
+    expect(pickHostWatchStream([composite])).toBeNull();
+    expect(guestBoxesForLayout(LIVE_LAYOUT_MODES.HOST_TOP_9)).toBe(9);
+  });
+
   it('fits host 16:9 + 3x3 + chat into the measured header/footer window', () => {
     const layout = measureHostTop9WatchLayout(360, 520);
     expect(layout.hostH + layout.gridH + layout.chatH).toBe(520);
@@ -106,6 +119,9 @@ describe('multiGuestLayout sticky slots', () => {
     expect(expanded.hostH).toBe(520);
     expect(expanded.gridH).toBe(0);
     expect(expanded.chatH).toBe(0);
+    const noChat = measureHostTop9WatchLayout(360, 520, { hideChat: true });
+    expect(noChat.chatH).toBe(0);
+    expect(noChat.hostH + noChat.gridH).toBe(520);
     expect(guestBoxesForLayout(LIVE_LAYOUT_MODES.HOST_TOP_9)).toBe(9);
   });
 
