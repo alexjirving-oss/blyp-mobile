@@ -39,8 +39,8 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, overflow: 'hidden',
   },
   iconShellActive: {
-    backgroundColor: 'rgba(0,210,190,0.14)',
-    borderColor: 'rgba(0,210,190,0.45)',
+    backgroundColor: 'rgba(255,45,85,0.16)',
+    borderColor: 'rgba(255,45,85,0.45)',
     ...SHADOWS.small,
     shadowColor: COLORS.primary,
     shadowOpacity: 0.22,

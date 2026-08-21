@@ -48,6 +48,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   labelOn: {
-    color: '#0A0A0C',
+    color: '#FFFFFF',
   },
 });

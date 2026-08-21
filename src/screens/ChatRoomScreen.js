@@ -346,7 +346,7 @@ const ChatRoomScreen = ({ route, navigation }) => {
               <LinearGradient
                 colors={
                   (messageText.trim() && !sending)
-                    ? ['#00D2BE', '#00A89E']
+                    ? ['#FF2D55', '#E01E45']
                     : ['#27272E', '#27272E']
                 }
                 style={styles.sendButtonGradient}
@@ -443,7 +443,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   currentUserBubble: {
-    backgroundColor: '#00D2BE',
+    backgroundColor: '#FF2D55',
     borderBottomRightRadius: 4,
   },
   otherUserBubble: {
@@ -461,7 +461,7 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   currentUserText: {
-    color: '#0A0A0C',
+    color: '#FFFFFF',
   },
   otherUserText: {
     color: '#fff',
@@ -563,7 +563,7 @@ const styles = StyleSheet.create({
   },
   modalCancel: {
     fontSize: 16,
-    color: '#00D2BE',
+    color: '#FF2D55',
     fontWeight: '600',
   },
   modalTitle: {
@@ -623,7 +623,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#00D2BE',
+    backgroundColor: '#FF2D55',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,

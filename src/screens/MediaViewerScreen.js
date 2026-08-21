@@ -901,7 +901,7 @@ const MediaViewerItem = ({
                 accessibilityRole="button"
                 accessibilityLabel="Follow creator"
               >
-                <LinearGradient colors={['#00D2BE', '#00A89E']} style={styles.followBadgeInner}>
+                <LinearGradient colors={['#FF2D55', '#E01E45']} style={styles.followBadgeInner}>
                   <Icon name="add" size={12} color="#0A0A0C" />
                 </LinearGradient>
               </TouchableOpacity>
@@ -1455,7 +1455,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   optionsCancelText: {
-    color: COLORS.primary || '#00D2BE',
+    color: COLORS.primary || '#FF2D55',
     fontSize: 16,
     fontWeight: '700',
     textAlign: 'center',
@@ -1493,7 +1493,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: 'rgba(10,10,12,0.62)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.4)',
+    borderColor: 'rgba(255, 45, 85,0.4)',
     borderTopColor: 'rgba(255,255,255,0.18)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 3 },
@@ -1569,7 +1569,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: 'rgba(10,10,12,0.82)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.28)',
+    borderColor: 'rgba(255, 45, 85,0.28)',
     zIndex: 1200,
     elevation: 1200,
   },

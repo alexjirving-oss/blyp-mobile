@@ -72,6 +72,7 @@ class IVSBroadcastModule(
         val streamKey: String,
         val participantId: String,
         val previewView: ImagePreviewView,
+        val stream: StageStream,
     )
 
     // UI supports 16 remote slots (2 pages of 8). Slot 1 is reserved by the JS UX.
@@ -102,6 +103,8 @@ class IVSBroadcastModule(
     private val remoteRenderSlots: MutableMap<Int, RenderSlot> = mutableMapOf()
     private val lastSlotAttachSig: MutableMap<Int, String> = mutableMapOf()
     private val viewerSlotViews: MutableMap<Int, WeakReference<IVSRealTimeView>> = mutableMapOf()
+    /** RN layout swaps unmount IVSRealTimeView; the old ImagePreviewView dies with its SurfaceTexture. */
+    private val slotNeedsFreshPreview: MutableSet<Int> = mutableSetOf()
     private val participantToSlot: MutableMap<String, Int> = mutableMapOf()
     private val slotToStreamKey: MutableMap<Int, String> = mutableMapOf()
     private val firstFrameSignalKeys: MutableSet<String> = mutableSetOf()
@@ -846,6 +849,7 @@ class IVSBroadcastModule(
     private fun stopSession() {
         bumpViewerRenderGeneration()
         lastSlotAttachSig.clear()
+        slotNeedsFreshPreview.clear()
         loudspeakerController.stop("stage-session-stop")
         pendingCameraSwitchOpen?.let { mainHandler.removeCallbacks(it) }
         pendingCameraSwitchSettle?.let { mainHandler.removeCallbacks(it) }
@@ -1235,7 +1239,10 @@ class IVSBroadcastModule(
     fun registerViewerSlotViewInternal(slotId: Int, view: IVSRealTimeView) {
         runOnMain {
             viewerSlotViews[slotId] = WeakReference(view)
-            remoteRenderSlots[slotId]?.let { attachSdkPreviewToSlot(it) }
+            val slot = remoteRenderSlots[slotId] ?: return@runOnMain
+            val ready =
+                if (slotNeedsFreshPreview.remove(slotId)) refreshDetachedSlotPreview(slot) else slot
+            attachSdkPreviewToSlot(ready)
         }
     }
 
@@ -1245,8 +1252,28 @@ class IVSBroadcastModule(
             if (current === view) {
                 view.detachSdkPreview()
                 viewerSlotViews.remove(slotId)
+                lastSlotAttachSig.remove(slotId)
+                // Layout remounts (Studio solo ↔ host-top-9) destroy the TextureView.
+                // Re-parenting the same ImagePreviewView stays black until a new preview.
+                slotNeedsFreshPreview.add(slotId)
             }
         }
+    }
+
+    private fun refreshDetachedSlotPreview(slot: RenderSlot): RenderSlot {
+        val fresh = sdkTexturePreview(slot.stream)
+        if (fresh == null || fresh === slot.previewView) {
+            Log.w(
+                IVS_TAG,
+                "[IVS_SLOT] remount preview refresh failed slot=${slot.slotId} sameInstance=${fresh === slot.previewView}",
+            )
+            return slot
+        }
+        (slot.previewView.parent as? ViewGroup)?.removeView(slot.previewView)
+        val next = slot.copy(previewView = fresh)
+        remoteRenderSlots[slot.slotId] = next
+        Log.i(IVS_TAG, "[IVS_SLOT] minted fresh sdk preview after RN remount slot=${slot.slotId}")
+        return next
     }
 
     private fun clearSlotSurfaceImmediately(slotId: Int, reason: String) {
@@ -1641,10 +1668,12 @@ class IVSBroadcastModule(
                 streamKey = key,
                 participantId = participant.participantId ?: "unknown",
                 previewView = previewView,
+                stream = stream,
             )
 
             remoteRenderSlots[slotId] = slot
             slotToStreamKey[slotId] = key
+            slotNeedsFreshPreview.remove(slotId)
 
             Log.d(IVS_TAG, "[IVS_SLOT] trackAdded participant=${participant.participantId} slot=$slotId streamKey=$key")
             attachSdkPreviewToSlot(slot)
@@ -1831,6 +1860,7 @@ class IVSBroadcastModule(
         remoteRenderSlots.clear()
         slotSurfaces.clear()
         lastSlotAttachSig.clear()
+        slotNeedsFreshPreview.clear()
         participantToSlot.clear()
         slotToStreamKey.clear()
         firstFrameSignalKeys.clear()

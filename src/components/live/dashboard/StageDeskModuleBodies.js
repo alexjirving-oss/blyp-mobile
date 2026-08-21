@@ -23,7 +23,7 @@ function ModuleCard({ children, accent }) {
 function ActionChip({ icon, label, onPress, active, accent }) {
   return (
     <TouchableOpacity
-      style={[styles.chip, active && { borderColor: accent || COLORS.primary, backgroundColor: 'rgba(0,210,190,0.12)' }]}
+      style={[styles.chip, active && { borderColor: accent || COLORS.primary, backgroundColor: 'rgba(255,45,85,0.12)' }]}
       onPress={onPress}
       activeOpacity={0.85}
     >

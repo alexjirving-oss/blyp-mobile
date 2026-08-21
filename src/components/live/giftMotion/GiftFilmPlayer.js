@@ -408,7 +408,7 @@ export default function GiftFilmPlayer({ entry, onSkip, onDone, film: filmProp }
         />
         {/* Soft grade — keeps teal/gold brand without crushing FX */}
         <LinearGradient
-          colors={['rgba(0,210,190,0.06)', 'transparent', 'rgba(251,191,36,0.05)']}
+          colors={['rgba(255,45,85,0.06)', 'transparent', 'rgba(251,191,36,0.05)']}
           start={{ x: 0.2, y: 0 }}
           end={{ x: 0.8, y: 1 }}
           style={styles.grade}

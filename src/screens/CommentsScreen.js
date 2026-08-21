@@ -442,7 +442,7 @@ const CommentsScreen = ({ route, navigation }) => {
                   disabled={!newComment.trim()}
                 >
                   <LinearGradient
-                    colors={newComment.trim() ? ['#00D2BE', '#00A89E'] : ['#27272E', '#27272E']}
+                    colors={newComment.trim() ? ['#FF2D55', '#E01E45'] : ['#27272E', '#27272E']}
                     style={styles.sendGradient}
                   >
                     <Icon name="send" size={20} color={newComment.trim() ? '#0A0A0C' : '#71717A'} />
@@ -660,7 +660,7 @@ const styles = StyleSheet.create({
     borderTopColor: '#333',
   },
   replyPreviewText: {
-    color: '#00D2BE',
+    color: '#FF2D55',
     fontSize: 14,
     fontWeight: '600',
   },

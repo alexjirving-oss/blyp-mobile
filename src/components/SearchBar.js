@@ -93,7 +93,7 @@ const SearchBar = ({ navigation, placeholder = "Search...", onSearch }) => {
       <Icon  
         name={section === 'trending' ? 'trending-up' : 'time-outline'} 
         size={16} 
-        color={section === 'trending' ? '#00D2BE' : '#666'} 
+        color={section === 'trending' ? '#FF2D55' : '#666'} 
        />
       <Text style={styles.suggestionText}>{item}</Text>
       <Icon  name="arrow-up-outline" size={16} color="#666" style={styles.suggestionArrow}  />
@@ -106,7 +106,7 @@ const SearchBar = ({ navigation, placeholder = "Search...", onSearch }) => {
       <View style={styles.quickActions}>
         {[
           { icon: 'people', label: 'Users', color: '#3b82f6' },
-          { icon: 'grid', label: 'Posts', color: '#00D2BE' },
+          { icon: 'grid', label: 'Posts', color: '#FF2D55' },
           { icon: 'pricetag', label: 'Tags', color: '#f59e0b' },
           { icon: 'location', label: 'Places', color: '#10b981' },
         ].map((action, index) => (
@@ -151,7 +151,7 @@ const SearchBar = ({ navigation, placeholder = "Search...", onSearch }) => {
       {suggestions?.trending && suggestions.trending.length > 0 && (
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Icon  name="flame" size={20} color="#00D2BE"  />
+            <Icon  name="flame" size={20} color="#FF2D55"  />
             <Text style={styles.sectionTitle}>Trending Now</Text>
           </View>
           <FlatList
@@ -280,7 +280,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   cancelButtonText: {
-    color: '#00D2BE',
+    color: '#FF2D55',
     fontSize: 16,
     fontWeight: '600',
   },

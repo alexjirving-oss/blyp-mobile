@@ -240,7 +240,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: 'center',
   },
-  primaryText: { color: '#0A0A0C', fontSize: 16, fontWeight: '800' },
+  primaryText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
   secondaryBtn: {
     flex: 1,
     borderRadius: 14,

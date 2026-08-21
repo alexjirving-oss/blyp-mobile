@@ -80,8 +80,8 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   free: {
-    backgroundColor: 'rgba(0,210,190,0.10)',
-    borderColor: 'rgba(0,210,190,0.35)',
+    backgroundColor: 'rgba(255, 45, 85,0.10)',
+    borderColor: 'rgba(255, 45, 85,0.35)',
   },
   pastDue: {
     backgroundColor: 'rgba(255,176,32,0.12)',

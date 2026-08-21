@@ -162,7 +162,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12, paddingHorizontal: 14, borderRadius: 12,
     borderWidth: 1, borderColor: COLORS.border, backgroundColor: 'rgba(255,255,255,0.03)',
   },
-  reasonActive: { borderColor: COLORS.primary, backgroundColor: 'rgba(0,210,190,0.08)' },
+  reasonActive: { borderColor: COLORS.primary, backgroundColor: 'rgba(255, 45, 85,0.08)' },
   reasonText: { color: COLORS.textSecondary, fontSize: responsiveFont(14), fontWeight: '600' },
   reasonTextActive: { color: COLORS.textPrimary, fontWeight: '700' },
   input: {

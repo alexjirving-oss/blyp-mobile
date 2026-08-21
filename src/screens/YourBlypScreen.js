@@ -100,9 +100,9 @@ const styles = StyleSheet.create({
     borderRadius: responsiveSize(14),
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,210,190,0.10)',
+    backgroundColor: 'rgba(255, 45, 85,0.10)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.22)',
+    borderColor: 'rgba(255, 45, 85,0.22)',
   },
   headerRule: {
     width: '100%',

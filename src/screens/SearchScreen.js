@@ -279,7 +279,7 @@ const SearchScreen = ({ navigation, route }) => {
       onPress={() => navigation.navigate('Blyp', { initialQuery: item.hashtag })}
     >
       <View style={styles.hashtagIcon}>
-        <Icon name="pricetag" size={24} color="#00D2BE" />
+        <Icon name="pricetag" size={24} color="#FF2D55" />
       </View>
       <View style={styles.hashtagInfo}>
         <Text style={styles.hashtagText}>{item.hashtag}</Text>
@@ -325,7 +325,7 @@ const SearchScreen = ({ navigation, route }) => {
       onPress={() => openClubMembers(item)}
     >
       <View style={styles.hashtagIcon}>
-        <Icon name={item.icon || 'football'} size={24} color="#00D2BE" />
+        <Icon name={item.icon || 'football'} size={24} color="#FF2D55" />
       </View>
       <View style={styles.hashtagInfo}>
         <Text style={styles.hashtagText}>{item.label}</Text>
@@ -379,7 +379,7 @@ const SearchScreen = ({ navigation, route }) => {
               style={styles.suggestionItem}
               onPress={() => handleSuggestionPress(item)}
             >
-              <Icon name="trending-up" size={16} color="#00D2BE" />
+              <Icon name="trending-up" size={16} color="#FF2D55" />
               <Text style={styles.suggestionText}>{item}</Text>
             </TouchableOpacity>
           ))}
@@ -418,7 +418,7 @@ const SearchScreen = ({ navigation, route }) => {
     if (isLoading) {
       return (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#00D2BE" />
+          <ActivityIndicator size="large" color="#FF2D55" />
           <Text style={styles.loadingText}>Searching...</Text>
         </View>
       );
@@ -621,7 +621,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.surfaceAlt,
   },
   activeTab: {
-    backgroundColor: '#00D2BE',
+    backgroundColor: '#FF2D55',
   },
   tabText: {
     color: '#666',
@@ -630,7 +630,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   activeTabText: {
-    color: '#0A0A0C',
+    color: '#FFFFFF',
     fontWeight: '700',
   },
   suggestionsContainer: {
@@ -653,7 +653,7 @@ const styles = StyleSheet.create({
   },
   viewAllButton: {
     fontSize: 14,
-    color: '#00D2BE',
+    color: '#FF2D55',
     fontWeight: '600',
   },
   suggestionItem: {
@@ -703,7 +703,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   followButton: {
-    backgroundColor: '#00D2BE',
+    backgroundColor: '#FF2D55',
     paddingHorizontal: 16,
     paddingVertical: 6,
     borderRadius: 15,
@@ -714,7 +714,7 @@ const styles = StyleSheet.create({
     borderColor: '#3F3F46',
   },
   followButtonText: {
-    color: '#0A0A0C',
+    color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '700',
   },
@@ -780,13 +780,13 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   trendingBadge: {
-    backgroundColor: '#00D2BE',
+    backgroundColor: '#FF2D55',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
   },
   trendingText: {
-    color: '#0A0A0C',
+    color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '700',
   },

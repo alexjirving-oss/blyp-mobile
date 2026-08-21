@@ -429,7 +429,7 @@ const MyTeamScreen = ({ navigation }) => {
         {renderHeader()}
         <View style={styles.emptyShell}>
           <LinearGradient
-            colors={['rgba(0,210,190,0.18)', 'transparent']}
+            colors={['rgba(255, 45, 85,0.18)', 'transparent']}
             start={{ x: 0.5, y: 0 }}
             end={{ x: 0.5, y: 1 }}
             style={styles.emptyGlow}
@@ -484,7 +484,7 @@ const MyTeamScreen = ({ navigation }) => {
           <View style={styles.hero}>
             <Animated.View style={[styles.heroAura, { opacity: glowOpacity }]} pointerEvents="none">
               <LinearGradient
-                colors={['rgba(0,210,190,0.35)', 'rgba(0,168,158,0.08)', 'transparent']}
+                colors={['rgba(255, 45, 85,0.35)', 'rgba(224, 30, 69,0.08)', 'transparent']}
                 style={StyleSheet.absoluteFill}
               />
             </Animated.View>
@@ -1015,7 +1015,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: '#0E1214',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.22)',
+    borderColor: 'rgba(255, 45, 85,0.22)',
     padding: 18,
   },
   heroAura: { ...StyleSheet.absoluteFillObject },
@@ -1032,7 +1032,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 20,
-    backgroundColor: 'rgba(0,210,190,0.12)',
+    backgroundColor: 'rgba(255, 45, 85,0.12)',
   },
   tierText: { color: COLORS.primary, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 },
   statsStrip: {
@@ -1053,8 +1053,8 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.35)',
-    backgroundColor: 'rgba(0,210,190,0.06)',
+    borderColor: 'rgba(255, 45, 85,0.35)',
+    backgroundColor: 'rgba(255, 45, 85,0.06)',
     overflow: 'hidden',
   },
   actionChipPrimary: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
@@ -1086,8 +1086,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.28)',
-    backgroundColor: 'rgba(0,210,190,0.06)',
+    borderColor: 'rgba(255, 45, 85,0.28)',
+    backgroundColor: 'rgba(255, 45, 85,0.06)',
   },
   memberControlDanger: {
     borderColor: 'rgba(248,113,113,0.3)',
@@ -1189,8 +1189,8 @@ const styles = StyleSheet.create({
   },
   messageBubbleMine: {
     alignSelf: 'flex-end',
-    backgroundColor: 'rgba(0,210,190,0.12)',
-    borderColor: 'rgba(0,210,190,0.3)',
+    backgroundColor: 'rgba(255, 45, 85,0.12)',
+    borderColor: 'rgba(255, 45, 85,0.3)',
   },
   messageBubbleWarning: {
     alignSelf: 'stretch',
@@ -1229,7 +1229,7 @@ const styles = StyleSheet.create({
   pickLabel: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '700', marginTop: 14, marginBottom: 6 },
   pickList: { maxHeight: 120, backgroundColor: COLORS.backgroundCard, borderRadius: 10, borderWidth: 1, borderColor: COLORS.border },
   pickRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, paddingHorizontal: 12 },
-  pickRowOn: { backgroundColor: 'rgba(0,210,190,0.08)' },
+  pickRowOn: { backgroundColor: 'rgba(255, 45, 85,0.08)' },
   pickText: { color: COLORS.textPrimary, fontSize: 14 },
   pickTextOn: { color: COLORS.primary, fontWeight: '700' },
 });

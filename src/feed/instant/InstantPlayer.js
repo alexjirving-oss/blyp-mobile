@@ -128,7 +128,7 @@ export default function InstantPlayer({
       />
       {showSpinner ? (
         <View style={styles.spinner} pointerEvents="none">
-          <ActivityIndicator color={COLORS.primary || '#00D2BE'} />
+          <ActivityIndicator color={COLORS.primary} />
         </View>
       ) : null}
     </View>

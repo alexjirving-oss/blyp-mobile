@@ -383,7 +383,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   roundText: {
-    color: '#00D2BE',
+    color: '#FF2D55',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -397,7 +397,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   countdownText: {
-    color: '#00D2BE',
+    color: '#FF2D55',
     fontSize: 80,
     fontWeight: 'bold',
     textAlign: 'center',
@@ -439,7 +439,7 @@ const styles = StyleSheet.create({
   },
   selectedChoice: {
     borderWidth: 3,
-    borderColor: '#00D2BE',
+    borderColor: '#FF2D55',
   },
   opponentChoice: {
     borderWidth: 3,
@@ -485,7 +485,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#00D2BE',
+    backgroundColor: '#FF2D55',
   },
   dot1: { opacity: 1 },
   dot2: { opacity: 0.6 },

@@ -244,7 +244,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.35)',
+    borderColor: 'rgba(255, 45, 85,0.35)',
   },
   avatarFallback: {
     alignItems: 'center',

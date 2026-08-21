@@ -33,14 +33,14 @@ import {
 
 const STAGE_COLOR = {
   audition: '#f5a623',
-  rising: '#00d2be',
+  rising: '#FF2D55',
   graduated: '#34c759',
   resting: '#8e8e93',
 };
 
 const BADGE_COLOR = {
   new: '#8e8e93',
-  trusted: '#00d2be',
+  trusted: '#FF2D55',
   verified: '#34c759',
   legacy: '#f5a623',
 };
@@ -274,10 +274,10 @@ const styles = StyleSheet.create({
   intro: { color: COLORS.textSecondary, fontSize: responsiveFont(14), lineHeight: responsiveFont(20), marginVertical: 12 },
 
   differentCard: {
-    backgroundColor: 'rgba(0,210,190,0.08)',
+    backgroundColor: 'rgba(255, 45, 85,0.08)',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.30)',
+    borderColor: 'rgba(255, 45, 85,0.30)',
     padding: 16,
     marginBottom: 26,
   },
@@ -300,7 +300,7 @@ const styles = StyleSheet.create({
   ratingNote: { color: COLORS.textSecondary, fontSize: responsiveFont(12), lineHeight: responsiveFont(17) },
 
   ruleRow: { flexDirection: 'row', gap: 12, marginBottom: 16 },
-  ruleIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(0,210,190,0.12)', alignItems: 'center', justifyContent: 'center' },
+  ruleIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255, 45, 85,0.12)', alignItems: 'center', justifyContent: 'center' },
   ruleText: { flex: 1 },
   ruleTitle: { color: COLORS.textPrimary, fontSize: responsiveFont(14), fontWeight: '700', marginBottom: 3 },
   ruleBody: { color: COLORS.textSecondary, fontSize: responsiveFont(13), lineHeight: responsiveFont(19) },

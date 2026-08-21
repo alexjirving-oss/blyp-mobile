@@ -608,7 +608,7 @@ const ChatListScreen = ({ navigation, route }) => {
                 {item.participantInfo.name}
               </Text>
               {item.isPinned && (
-                <Icon name="pin" size={14} color="#00D2BE" />
+                <Icon name="pin" size={14} color="#FF2D55" />
               )}
             </View>
             <Text style={[styles.timestamp, isUnread && styles.unreadTimestamp]}>
@@ -1171,7 +1171,7 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.divider,
   },
   pinnedChat: {
-    backgroundColor: 'rgba(0, 210, 190, 0.12)',
+    backgroundColor: 'rgba(255, 45, 85, 0.12)',
   },
   avatarContainer: {
     position: 'relative',
@@ -1405,7 +1405,7 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
   },
   getMoreButton: {
-    backgroundColor: '#00D2BE',
+    backgroundColor: '#FF2D55',
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 8,
@@ -1413,7 +1413,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   menuButtonText: {
-    color: '#0A0A0C',
+    color: '#FFFFFF',
     fontSize: 14,
     fontWeight: 'bold',
   },
@@ -1495,7 +1495,7 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
   },
   countBadge: {
-    backgroundColor: 'rgba(0, 210, 190, 0.16)',
+    backgroundColor: 'rgba(255, 45, 85, 0.16)',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
@@ -1921,7 +1921,7 @@ const styles = StyleSheet.create({
   liveBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 210, 190, 0.16)',
+    backgroundColor: 'rgba(255, 45, 85, 0.16)',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,

@@ -133,7 +133,7 @@ const PrivacySettingsScreen = ({ navigation }) => {
   if (loading) {
     return (
       <SettingsScreenShell navigation={navigation} title="Privacy & Security" scroll={false}>
-        <ActivityIndicator color="#00D2BE" style={{ marginTop: 40 }} />
+        <ActivityIndicator color="#FF2D55" style={{ marginTop: 40 }} />
       </SettingsScreenShell>
     );
   }
@@ -152,7 +152,7 @@ const PrivacySettingsScreen = ({ navigation }) => {
           value={consent}
           onValueChange={onToggleConsent}
           disabled={busy}
-          trackColor={{ false: '#141418', true: '#00A89E' }}
+          trackColor={{ false: '#141418', true: '#E01E45' }}
           thumbColor="#F5F5F7"
         />
       </View>
@@ -170,7 +170,7 @@ const PrivacySettingsScreen = ({ navigation }) => {
           value={leaderboardOptOut}
           onValueChange={onToggleLeaderboardOptOut}
           disabled={busy || !uid}
-          trackColor={{ false: '#141418', true: '#00A89E' }}
+          trackColor={{ false: '#141418', true: '#E01E45' }}
           thumbColor="#F5F5F7"
         />
       </View>

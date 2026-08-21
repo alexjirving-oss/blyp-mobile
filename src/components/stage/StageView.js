@@ -43,7 +43,7 @@ function openExternalUrl(url) {
 }
 
 function StageCover({ theme, wallpaper, coverUrl, liveStream, onLivePress }) {
-  const fallback = theme?.colors?.coverFallback || ['#0A0A0C', '#00D2BE'];
+  const fallback = theme?.colors?.coverFallback || ['#0A0A0C', '#FF2D55'];
   const wallColors = wallpaper?.colors;
   return (
     <View style={styles.coverWrap}>

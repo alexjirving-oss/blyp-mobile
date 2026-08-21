@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -16,9 +17,8 @@ import { responsiveFont, responsiveSize } from '../../utils/scaleUtils';
 import {
   getForYouPosts,
   getTrendingPosts,
-  getSuggestedCreators,
+  getFollowingPosts,
   getLiveNow,
-  creatorAvatar,
   streamThumbnail,
 } from '../../services/discoveryService';
 import { postThumbnail } from '../../services/blypAiService';
@@ -36,21 +36,18 @@ import {
   getRootishNavigationState,
   shouldEjectEndedLiveProbe,
 } from '../../live/joinStatusPreflight';
+import { subscribeToFollowingList } from '../../utils/followUtils';
 import HomeNextRail from './HomeNextRail';
-import HomePhoneStrip from './HomePhoneStrip';
+import HomeStatusBubbles from './HomeStatusBubbles';
 
-const HERO_W = 176;
-const HERO_H = 268;
 const CARD_W = 148;
 const CARD_H = 214;
 const GAP = 12;
-
-function greeting() {
-  const h = new Date().getHours();
-  if (h < 12) return 'Good morning';
-  if (h < 18) return 'Good afternoon';
-  return 'Good evening';
-}
+const CHIPS = [
+  { key: 'trending', label: 'Trending' },
+  { key: 'friends', label: 'Friends watched' },
+  { key: 'tonight', label: 'Tonight' },
+];
 
 function isHashtagDump(s) {
   const t = String(s || '').trim();
@@ -89,11 +86,37 @@ function otherPeer(thread, uid) {
   };
 }
 
-function SectionHead({ title, action, onPress }) {
+function formatCount(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v <= 0) return '';
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
+  if (v >= 1000) return `${(v / 1000).toFixed(1).replace(/\.0$/, '')}K`;
+  return String(Math.round(v));
+}
+
+function formatDuration(item) {
+  const s = Number(item?.duration || item?.durationSeconds || item?.length || 0);
+  if (!Number.isFinite(s) || s <= 0) return '';
+  const m = Math.floor(s / 60);
+  const r = Math.floor(s % 60);
+  return `${m}:${String(r).padStart(2, '0')}`;
+}
+
+function streamViewers(stream) {
+  return formatCount(
+    stream?.viewerCount ?? stream?.viewers ?? stream?.concurrentViews ?? stream?.watchers,
+  );
+}
+
+function streamPlace(stream) {
+  return stream?.location || stream?.city || stream?.place || '';
+}
+
+function SectionHead({ title, icon, action, onPress }) {
   return (
     <View style={styles.sectionHead}>
       <View style={styles.sectionTitleRow}>
-        <View style={styles.sectionAccent} />
+        {icon ? <Icon name={icon} size={16} color={COLORS.primary} /> : null}
         <Text style={styles.sectionTitle}>{title}</Text>
       </View>
       {action ? (
@@ -105,12 +128,19 @@ function SectionHead({ title, action, onPress }) {
   );
 }
 
-function PosterCard({ uri, label, badge, tall, onPress }) {
-  const w = tall ? HERO_W : CARD_W;
-  const h = tall ? HERO_H : CARD_H;
+function LivePill() {
   return (
-    <TouchableOpacity style={{ width: w }} activeOpacity={0.88} onPress={onPress}>
-      <View style={[styles.poster, { width: w, height: h }]}>
+    <View style={styles.liveBadge}>
+      <View style={styles.liveDot} />
+      <Text style={styles.liveBadgeText}>LIVE</Text>
+    </View>
+  );
+}
+
+function ClipCard({ uri, title, views, duration, wide, height, onPress }) {
+  return (
+    <TouchableOpacity style={{ width: wide ? '100%' : undefined, flex: wide ? 1 : undefined }} activeOpacity={0.88} onPress={onPress}>
+      <View style={[styles.clip, { height }]}>
         {uri ? (
           <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
         ) : (
@@ -119,28 +149,27 @@ function PosterCard({ uri, label, badge, tall, onPress }) {
           </View>
         )}
         <LinearGradient
-          colors={['transparent', 'rgba(0,0,0,0.15)', 'rgba(0,0,0,0.82)']}
-          locations={[0.45, 0.7, 1]}
+          colors={['transparent', 'rgba(0,0,0,0.82)']}
+          locations={[0.45, 1]}
           style={StyleSheet.absoluteFill}
           pointerEvents="none"
         />
-        {badge ? (
-          <View style={styles.liveBadge}>
-            <View style={styles.liveDot} />
-            <Text style={styles.liveBadgeText}>{badge}</Text>
-          </View>
-        ) : null}
-        <Text style={styles.posterLabel} numberOfLines={2}>
-          {label}
+        <View style={styles.playOrb}>
+          <Icon name="play" size={12} color={COLORS.white} />
+        </View>
+        {duration ? <Text style={styles.clipDuration}>{duration}</Text> : null}
+        <Text style={styles.clipTitle} numberOfLines={2}>
+          {title}
         </Text>
+        {views ? <Text style={styles.clipViews}>{views} views</Text> : null}
       </View>
     </TouchableOpacity>
   );
 }
 
 function RailSkeleton({ tall }) {
-  const w = tall ? HERO_W : CARD_W;
-  const h = tall ? HERO_H : CARD_H;
+  const w = tall ? 176 : CARD_W;
+  const h = tall ? 268 : CARD_H;
   return (
     <View style={styles.skelRow}>
       {[0, 1, 2].map((i) => (
@@ -157,14 +186,17 @@ export default function HomeNextPanel({
   onOpenPage,
   onOpenForYouPost,
 }) {
+  const { width } = useWindowDimensions();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [forYou, setForYou] = useState([]);
   const [watch, setWatch] = useState([]);
   const [live, setLive] = useState([]);
   const [trending, setTrending] = useState([]);
-  const [creators, setCreators] = useState([]);
+  const [friendsPosts, setFriendsPosts] = useState([]);
   const [people, setPeople] = useState([]);
+  const [followingIds, setFollowingIds] = useState([]);
+  const [chip, setChip] = useState('trending');
   const liveProbeGenRef = useRef(0);
 
   const interestTerms = useMemo(
@@ -173,17 +205,24 @@ export default function HomeNextPanel({
   );
 
   const loadRails = useCallback(async () => {
-    const [fy, trend, creator, liveRes] = await Promise.all([
+    const [fy, trend, liveRes, following] = await Promise.all([
       getForYouPosts(interestTerms, [], 14),
       getTrendingPosts(12, interestTerms),
-      getSuggestedCreators(12, interestTerms, uid),
-      getLiveNow(10),
+      getLiveNow(12),
+      followingIds.length ? getFollowingPosts(followingIds, 12) : Promise.resolve([]),
     ]);
     setForYou(Array.isArray(fy) ? fy : []);
     setTrending(Array.isArray(trend) ? trend : []);
-    setCreators(Array.isArray(creator) ? creator : []);
     setLive(Array.isArray(liveRes) ? liveRes : []);
-  }, [interestTerms, uid]);
+    setFriendsPosts(Array.isArray(following) ? following : []);
+  }, [interestTerms, followingIds]);
+
+  useEffect(() => {
+    if (!uid) return undefined;
+    return subscribeToFollowingList(uid, (set) => {
+      setFollowingIds([...(set || [])].map(String).filter(Boolean));
+    });
+  }, [uid]);
 
   useEffect(() => {
     let alive = true;
@@ -296,69 +335,50 @@ export default function HomeNextPanel({
       .catch(() => {});
   };
 
-  const openCreator = (user) =>
-    navigation.navigate('UserProfile', {
-      userId: user.id || user.uid || user.userId,
-      username: user.username || user.displayName || '@user',
-    });
-
-  const openChat = (person) => {
-    navigation.navigate('ChatConversation', {
-      chatId: person.threadId,
-      conversationId: person.threadId,
-      otherUser: {
-        id: person.id,
-        displayName: person.displayName,
-        username: person.username,
-        photoURL: person.photoURL,
-      },
-    });
+  const openProfile = (userId, username) => {
+    if (!userId) return;
+    navigation.navigate('UserProfile', { userId, username: username || '@user' });
   };
 
-  const renderHero = useCallback(
-    ({ item }) => (
-      <PosterCard
-        tall
-        uri={postThumbnail(item)}
-        label={railCaption(item)}
-        onPress={() => openForYou(item)}
-      />
-    ),
-    [onOpenForYouPost, onOpenPage],
-  );
+  const featured = live[0] || null;
+  const liveRooms = featured ? live.slice(1, 5) : live.slice(0, 4);
+  const mosaic = chip === 'friends' ? friendsPosts : chip === 'tonight' ? forYou : trending;
+  const mosaicItems = mosaic.length ? mosaic : forYou;
+  const leftH = Math.round((width - 40) * 0.72);
+  const rightH = Math.round((leftH - 10) / 2);
 
   const renderWatch = useCallback(
     ({ item }) => (
-      <PosterCard
-        uri={fixStorageUrl(item.thumbnail)}
-        label={railCaption(item)}
+      <TouchableOpacity
+        style={{ width: CARD_W }}
+        activeOpacity={0.88}
         onPress={() => openPost(item, watch)}
-      />
+      >
+        <View style={[styles.clip, { width: CARD_W, height: CARD_H }]}>
+          {item.thumbnail ? (
+            <Image
+              source={{ uri: fixStorageUrl(item.thumbnail) }}
+              style={StyleSheet.absoluteFill}
+              resizeMode="cover"
+            />
+          ) : (
+            <View style={[StyleSheet.absoluteFill, styles.posterFallback]}>
+              <Icon name="play" size={22} color={COLORS.primary} />
+            </View>
+          )}
+          <LinearGradient
+            colors={['transparent', 'rgba(0,0,0,0.82)']}
+            locations={[0.5, 1]}
+            style={StyleSheet.absoluteFill}
+            pointerEvents="none"
+          />
+        </View>
+        <Text style={styles.watchTitle} numberOfLines={1}>
+          {railCaption(item)}
+        </Text>
+      </TouchableOpacity>
     ),
     [watch],
-  );
-
-  const renderLive = useCallback(
-    ({ item }) => (
-      <PosterCard
-        uri={streamThumbnail(item)}
-        label={item.title || item.hostDisplayName || item.hostUsername || 'Live'}
-        badge="LIVE"
-        onPress={() => openLive(item)}
-      />
-    ),
-    [],
-  );
-
-  const renderTrend = useCallback(
-    ({ item }) => (
-      <PosterCard
-        uri={postThumbnail(item)}
-        label={railCaption(item)}
-        onPress={() => openPost(item, trending)}
-      />
-    ),
-    [trending],
   );
 
   return (
@@ -375,48 +395,190 @@ export default function HomeNextPanel({
         />
       }
     >
-      <LinearGradient
-        colors={['rgba(0,210,190,0.08)', 'transparent']}
-        locations={[0, 1]}
-        style={styles.glow}
-        pointerEvents="none"
-      />
-
-      <View style={styles.topRow}>
-        <Text style={styles.greet}>{greeting()}</Text>
+      <View style={styles.bubbles}>
+        <HomeStatusBubbles
+          uid={uid}
+          liveStreams={live}
+          recentPeers={people}
+          onOpenLive={openLive}
+          onOpenProfile={openProfile}
+        />
       </View>
 
-      <TouchableOpacity
-        style={styles.search}
-        activeOpacity={0.9}
-        onPress={() => navigation.navigate('Blyp')}
-      >
-        <View style={styles.searchInner}>
-          <Icon name="sparkles" size={18} color={COLORS.primary} />
-          <Text style={styles.searchText}>Search or ask Blyp…</Text>
-          <View style={styles.micOrb}>
-            <Icon name="mic" size={14} color="#0A0A0C" />
-          </View>
+      {featured ? (
+        <View style={styles.block}>
+          <SectionHead title="Featured Now" />
+          <TouchableOpacity style={styles.featured} activeOpacity={0.9} onPress={() => openLive(featured)}>
+            {streamThumbnail(featured) ? (
+              <Image
+                source={{ uri: streamThumbnail(featured) }}
+                style={StyleSheet.absoluteFill}
+                resizeMode="cover"
+              />
+            ) : (
+              <View style={[StyleSheet.absoluteFill, styles.posterFallback]} />
+            )}
+            <LinearGradient
+              colors={['rgba(0,0,0,0.15)', 'rgba(0,0,0,0.82)']}
+              locations={[0.35, 1]}
+              style={StyleSheet.absoluteFill}
+              pointerEvents="none"
+            />
+            <View style={styles.featuredTop}>
+              <LivePill />
+              {streamViewers(featured) ? (
+                <View style={styles.viewerPill}>
+                  <Icon name="eye" size={12} color={COLORS.white} />
+                  <Text style={styles.viewerText}>{streamViewers(featured)}</Text>
+                </View>
+              ) : null}
+            </View>
+            <View style={styles.featuredBottom}>
+              <View style={styles.featuredHost}>
+                {streamThumbnail(featured) ? (
+                  <Image source={{ uri: streamThumbnail(featured) }} style={styles.hostAvatar} />
+                ) : (
+                  <View style={styles.hostAvatar} />
+                )}
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.hostName} numberOfLines={1}>
+                    {featured.hostUsername || featured.hostDisplayName || 'Live'}
+                  </Text>
+                  {streamPlace(featured) ? (
+                    <Text style={styles.hostPlace} numberOfLines={1}>
+                      {streamPlace(featured)}
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
+              <Text style={styles.featuredTitle} numberOfLines={2}>
+                {featured.title || railCaption(featured)}
+              </Text>
+              {featured.description ? (
+                <Text style={styles.featuredDesc} numberOfLines={2}>
+                  {featured.description}
+                </Text>
+              ) : null}
+              <View style={styles.watchLive}>
+                <Icon name="radio" size={14} color={COLORS.white} />
+                <Text style={styles.watchLiveText}>Watch Live</Text>
+              </View>
+            </View>
+          </TouchableOpacity>
         </View>
-      </TouchableOpacity>
-
-      <HomePhoneStrip navigation={navigation} uid={uid} />
+      ) : null}
 
       <View style={styles.block}>
-        <SectionHead title="For you" action="Open feed" onPress={() => onOpenPage?.('A')} />
-        {loading && forYou.length === 0 ? (
+        <SectionHead
+          title="For you"
+          icon="sparkles"
+          action="See all"
+          onPress={() => onOpenPage?.('A')}
+        />
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipRow}
+        >
+          {CHIPS.map((c) => {
+            const on = chip === c.key;
+            return (
+              <TouchableOpacity
+                key={c.key}
+                style={[styles.chip, on && styles.chipOn]}
+                onPress={() => setChip(c.key)}
+                activeOpacity={0.85}
+              >
+                <Text style={[styles.chipText, on && styles.chipTextOn]}>{c.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+        {loading && mosaicItems.length === 0 ? (
           <RailSkeleton tall />
-        ) : forYou.length > 0 ? (
-          <HomeNextRail
-            data={forYou}
-            itemWidth={HERO_W}
-            gap={GAP}
-            height={HERO_H + 4}
-            keyExtractor={(p) => String(p.id)}
-            renderCard={renderHero}
-          />
+        ) : mosaicItems.length > 0 ? (
+          <View style={styles.mosaic}>
+            <View style={styles.mosaicLeft}>
+              <ClipCard
+                uri={postThumbnail(mosaicItems[0])}
+                title={railCaption(mosaicItems[0])}
+                views={formatCount(mosaicItems[0]?.views || mosaicItems[0]?.viewCount)}
+                duration={formatDuration(mosaicItems[0])}
+                height={leftH}
+                wide
+                onPress={() => openForYou(mosaicItems[0])}
+              />
+            </View>
+            <View style={styles.mosaicRight}>
+              {mosaicItems.slice(1, 3).map((item) => (
+                <ClipCard
+                  key={String(item.id)}
+                  uri={postThumbnail(item)}
+                  title={railCaption(item)}
+                  views={formatCount(item?.views || item?.viewCount)}
+                  duration={formatDuration(item)}
+                  height={rightH}
+                  wide
+                  onPress={() => openForYou(item)}
+                />
+              ))}
+            </View>
+          </View>
         ) : null}
       </View>
+
+      {liveRooms.length > 0 ? (
+        <View style={styles.block}>
+          <SectionHead title="Live rooms for you" icon="radio" />
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.roomsRow}
+          >
+            {liveRooms.map((stream) => {
+              const id = String(stream.id || stream.streamId);
+              return (
+                <TouchableOpacity
+                  key={id}
+                  style={styles.roomCard}
+                  activeOpacity={0.88}
+                  onPress={() => openLive(stream)}
+                >
+                  {streamThumbnail(stream) ? (
+                    <Image
+                      source={{ uri: streamThumbnail(stream) }}
+                      style={StyleSheet.absoluteFill}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View style={[StyleSheet.absoluteFill, styles.posterFallback]} />
+                  )}
+                  <LinearGradient
+                    colors={['rgba(0,0,0,0.1)', 'rgba(0,0,0,0.78)']}
+                    style={StyleSheet.absoluteFill}
+                    pointerEvents="none"
+                  />
+                  <View style={styles.roomTop}>
+                    <LivePill />
+                    {streamViewers(stream) ? (
+                      <View style={styles.viewerPill}>
+                        <Icon name="eye" size={11} color={COLORS.white} />
+                        <Text style={styles.viewerText}>{streamViewers(stream)}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text style={styles.roomTitle} numberOfLines={1}>
+                    {stream.title || 'Live room'}
+                  </Text>
+                  <Text style={styles.roomHost} numberOfLines={1}>
+                    {stream.hostUsername || stream.hostDisplayName || 'Host'}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      ) : null}
 
       {watch.length > 0 ? (
         <View style={styles.block}>
@@ -425,105 +587,10 @@ export default function HomeNextPanel({
             data={watch}
             itemWidth={CARD_W}
             gap={GAP}
-            height={CARD_H + 4}
+            height={CARD_H + 28}
             keyExtractor={(p) => String(p.id)}
             renderCard={renderWatch}
           />
-        </View>
-      ) : null}
-
-      {live.length > 0 ? (
-        <View style={styles.block}>
-          <SectionHead title="Live now" />
-          <HomeNextRail
-            data={live}
-            itemWidth={CARD_W}
-            gap={GAP}
-            height={CARD_H + 4}
-            keyExtractor={(s) => String(s.id || s.streamId)}
-            renderCard={renderLive}
-          />
-        </View>
-      ) : null}
-
-      {people.length > 0 ? (
-        <View style={styles.block}>
-          <SectionHead title="Messages" action="See all" onPress={() => navigation.navigate('Messenger')} />
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.peopleRow}
-          >
-            {people.map((p) => {
-              const initial = (p.displayName || '?').slice(0, 1).toUpperCase();
-              return (
-                <TouchableOpacity key={p.id} style={styles.person} onPress={() => openChat(p)} activeOpacity={0.88}>
-                  {p.photoURL ? (
-                    <Image source={{ uri: p.photoURL }} style={styles.avatar} />
-                  ) : (
-                    <View style={[styles.avatar, styles.avatarFallback]}>
-                      <Text style={styles.avatarInitial}>{initial}</Text>
-                    </View>
-                  )}
-                  <Text style={styles.personName} numberOfLines={1}>
-                    {p.displayName}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
-      ) : null}
-
-      {loading && trending.length === 0 ? (
-        <View style={styles.block}>
-          <SectionHead title="Trending" />
-          <RailSkeleton />
-        </View>
-      ) : trending.length > 0 ? (
-        <View style={styles.block}>
-          <SectionHead title="Trending" />
-          <HomeNextRail
-            data={trending}
-            itemWidth={CARD_W}
-            gap={GAP}
-            height={CARD_H + 4}
-            keyExtractor={(p) => String(p.id)}
-            renderCard={renderTrend}
-          />
-        </View>
-      ) : null}
-
-      {creators.length > 0 ? (
-        <View style={styles.block}>
-          <SectionHead title="Creators" action="See all" onPress={() => navigation.navigate('FindPeople')} />
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.peopleRow}
-          >
-            {creators.map((u) => {
-              const id = u.id || u.uid || u.userId;
-              const name = u.displayName || u.username || u.name || 'Creator';
-              const uri = creatorAvatar(u);
-              return (
-                <TouchableOpacity key={String(id)} style={styles.person} onPress={() => openCreator(u)} activeOpacity={0.88}>
-                  <View style={styles.creatorRing}>
-                    {uri ? (
-                      <Image source={{ uri }} style={styles.creatorAvatar} />
-                    ) : (
-                      <View style={[styles.creatorAvatar, styles.avatarFallback]}>
-                        <Text style={styles.avatarInitial}>{String(name).slice(0, 1).toUpperCase()}</Text>
-                      </View>
-                    )}
-                  </View>
-                  <Text style={styles.personName} numberOfLines={1}>
-                    {name}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
         </View>
       ) : null}
 
@@ -534,58 +601,8 @@ export default function HomeNextPanel({
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: COLORS.pageBackground },
-  content: { paddingTop: 6 },
-  glow: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 220,
-  },
-  topRow: {
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  greet: {
-    color: COLORS.textPrimary,
-    fontSize: responsiveFont(22),
-    fontWeight: '800',
-    letterSpacing: -0.6,
-  },
-  search: {
-    marginHorizontal: 16,
-    marginBottom: 16,
-    borderRadius: 16,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    backgroundColor: '#101014',
-  },
-  searchInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    height: 48,
-    paddingHorizontal: 14,
-    borderRadius: 16,
-    backgroundColor: '#101014',
-  },
-  searchText: {
-    flex: 1,
-    color: COLORS.textSecondary,
-    fontSize: responsiveFont(15),
-    fontWeight: '600',
-  },
-  micOrb: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: COLORS.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  content: { paddingTop: 4 },
+  bubbles: { marginBottom: 18 },
   block: { marginBottom: 22 },
   sectionHead: {
     paddingHorizontal: 16,
@@ -595,12 +612,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  sectionAccent: {
-    width: 3,
-    height: 16,
-    borderRadius: 2,
-    backgroundColor: COLORS.primary,
-  },
   sectionTitle: {
     color: COLORS.textPrimary,
     fontSize: responsiveFont(18),
@@ -612,36 +623,81 @@ const styles = StyleSheet.create({
     fontSize: responsiveFont(13),
     fontWeight: '800',
   },
-  poster: {
-    borderRadius: 18,
+  featured: {
+    marginHorizontal: 16,
+    height: responsiveSize(280),
+    borderRadius: 22,
     overflow: 'hidden',
-    backgroundColor: '#141418',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: COLORS.backgroundCard,
   },
-  posterFallback: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#16161C',
-  },
-  posterLabel: {
+  featuredTop: {
     position: 'absolute',
-    left: 10,
-    right: 10,
-    bottom: 10,
-    color: '#fff',
-    fontSize: responsiveFont(13),
+    top: 12,
+    left: 12,
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  featuredBottom: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    bottom: 14,
+  },
+  featuredHost: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  hostAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: COLORS.backgroundLight,
+  },
+  hostName: {
+    color: COLORS.white,
     fontWeight: '800',
-    letterSpacing: -0.2,
+    fontSize: responsiveFont(13),
+  },
+  hostPlace: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: responsiveFont(11),
+  },
+  featuredTitle: {
+    color: COLORS.white,
+    fontSize: responsiveFont(22),
+    fontWeight: '800',
+    letterSpacing: -0.5,
+  },
+  featuredDesc: {
+    color: 'rgba(255,255,255,0.78)',
+    fontSize: responsiveFont(13),
+    marginTop: 4,
+  },
+  watchLive: {
+    alignSelf: 'flex-end',
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  watchLiveText: {
+    color: COLORS.white,
+    fontWeight: '800',
+    fontSize: responsiveFont(13),
   },
   liveBadge: {
-    position: 'absolute',
-    top: 10,
-    left: 10,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    backgroundColor: '#E11D48',
+    backgroundColor: COLORS.primary,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 999,
@@ -650,13 +706,137 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.white,
   },
   liveBadgeText: {
-    color: '#fff',
+    color: COLORS.white,
     fontSize: responsiveFont(10),
     fontWeight: '900',
     letterSpacing: 0.6,
+  },
+  viewerPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  viewerText: {
+    color: COLORS.white,
+    fontSize: responsiveFont(11),
+    fontWeight: '700',
+  },
+  chipRow: {
+    paddingHorizontal: 16,
+    gap: 8,
+    marginBottom: 12,
+  },
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: COLORS.backgroundLight,
+  },
+  chipOn: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+  },
+  chipText: {
+    color: COLORS.textMuted,
+    fontWeight: '700',
+    fontSize: responsiveFont(13),
+  },
+  chipTextOn: {
+    color: COLORS.primary,
+  },
+  mosaic: {
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    gap: 10,
+  },
+  mosaicLeft: { flex: 1.05 },
+  mosaicRight: { flex: 1, gap: 10 },
+  clip: {
+    borderRadius: 18,
+    overflow: 'hidden',
+    backgroundColor: COLORS.backgroundCard,
+    justifyContent: 'flex-end',
+    padding: 10,
+  },
+  posterFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.backgroundLight,
+  },
+  playOrb: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  clipDuration: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    color: COLORS.white,
+    fontSize: responsiveFont(10),
+    fontWeight: '800',
+  },
+  clipTitle: {
+    color: COLORS.white,
+    fontSize: responsiveFont(13),
+    fontWeight: '800',
+  },
+  clipViews: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: responsiveFont(11),
+    marginTop: 2,
+  },
+  roomsRow: {
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  roomCard: {
+    width: responsiveSize(210),
+    height: responsiveSize(132),
+    borderRadius: 18,
+    overflow: 'hidden',
+    backgroundColor: COLORS.backgroundCard,
+    padding: 12,
+    justifyContent: 'flex-end',
+  },
+  roomTop: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    right: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  roomTitle: {
+    color: COLORS.white,
+    fontWeight: '800',
+    fontSize: responsiveFont(15),
+  },
+  roomHost: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: responsiveFont(12),
+    marginTop: 2,
+  },
+  watchTitle: {
+    color: COLORS.textPrimary,
+    fontSize: responsiveFont(12),
+    fontWeight: '700',
+    marginTop: 8,
   },
   skelRow: {
     flexDirection: 'row',
@@ -666,52 +846,5 @@ const styles = StyleSheet.create({
   skelCard: {
     borderRadius: 18,
     backgroundColor: 'rgba(255,255,255,0.06)',
-  },
-  peopleRow: {
-    paddingHorizontal: 16,
-    gap: 14,
-  },
-  person: {
-    width: 72,
-    alignItems: 'center',
-  },
-  avatar: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    backgroundColor: '#1A1A20',
-  },
-  avatarFallback: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarInitial: {
-    color: COLORS.primary,
-    fontSize: responsiveFont(18),
-    fontWeight: '800',
-  },
-  personName: {
-    marginTop: 6,
-    color: COLORS.textPrimary,
-    fontSize: responsiveFont(11),
-    fontWeight: '700',
-    width: '100%',
-    textAlign: 'center',
-  },
-  creatorRing: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
-    padding: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: COLORS.primary,
-  },
-  creatorAvatar: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    backgroundColor: '#101014',
   },
 });

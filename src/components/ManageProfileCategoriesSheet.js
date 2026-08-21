@@ -287,5 +287,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: COLORS.primary,
   },
-  saveText: { color: '#0A0A0C', fontSize: 15, fontWeight: '800' },
+  saveText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
 });

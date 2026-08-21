@@ -6,7 +6,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-nati
 import { LinearGradient } from 'expo-linear-gradient';
 import FrenemiesWheelGlyph from './frenemies/FrenemiesWheelGlyph';
 
-const TEAL = '#00D2BE';
+const TEAL = '#FF2D55';
 const GOLD = '#F5C542';
 const INK = '#0A0A0C';
 
@@ -66,7 +66,7 @@ export default function LiveGamesPicker({
                 style={styles.card}
               >
                 <View style={[styles.badge, { backgroundColor: TEAL }]}>
-                  <Text style={styles.badgeText} allowFontScaling={false}>
+                  <Text style={[styles.badgeText, { color: '#FFFFFF' }]} allowFontScaling={false}>
                     LIVE
                   </Text>
                 </View>
@@ -80,7 +80,7 @@ export default function LiveGamesPicker({
                   Host spins · throw · room challenges
                 </Text>
                 <View style={[styles.cta, { backgroundColor: TEAL }]}>
-                  <Text style={styles.ctaText} allowFontScaling={false}>
+                  <Text style={[styles.ctaText, { color: '#FFFFFF' }]} allowFontScaling={false}>
                     {standaloneGamesDisabled ? 'Exit battle to switch' : 'Open'}
                   </Text>
                 </View>
@@ -228,7 +228,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 14,
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.35)',
+    borderColor: 'rgba(255,45,85,0.35)',
     maxHeight: '82%',
   },
   header: { marginBottom: 12, paddingRight: 56 },

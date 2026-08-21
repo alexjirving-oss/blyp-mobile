@@ -572,7 +572,7 @@ const UserProfileScreen = ({ route, navigation }) => {
         onPress={handleFollowToggle}
       >
         <LinearGradient
-          colors={isFollowing ? ['#27272E', '#3F3F46'] : ['#00D2BE', '#00A89E']}
+          colors={isFollowing ? ['#27272E', '#3F3F46'] : ['#FF2D55', '#E01E45']}
           style={styles.followButtonGradient}
         >
           <Text style={[styles.followButtonText, !isFollowing && styles.followButtonTextActive]}>
@@ -616,7 +616,7 @@ const UserProfileScreen = ({ route, navigation }) => {
         style={styles.followButton}
         onPress={() => navigation.navigate('EditStage')}
       >
-        <LinearGradient colors={['#00D2BE', '#00A89E']} style={styles.followButtonGradient}>
+        <LinearGradient colors={['#FF2D55', '#E01E45']} style={styles.followButtonGradient}>
           <Text style={[styles.followButtonText, styles.followButtonTextActive]}>Edit Stage</Text>
         </LinearGradient>
       </TouchableOpacity>
@@ -877,7 +877,7 @@ const UserProfileScreen = ({ route, navigation }) => {
               </View>
             )}
             ListFooterComponent={loadingMore ? (
-              <View style={styles.footerLoader}><ActivityIndicator size="small" color="#00D2BE" /></View>
+              <View style={styles.footerLoader}><ActivityIndicator size="small" color="#FF2D55" /></View>
             ) : null}
           />
         </View>
@@ -1024,7 +1024,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   followButtonText: { color: '#9ca3af', fontWeight: '700', fontSize: 15 },
-  followButtonTextActive: { color: '#0A0A0C' },
+  followButtonTextActive: { color: '#FFFFFF' },
   messageButton: {
     width: 46,
     height: 46,

@@ -508,8 +508,8 @@ function createStyles(theme) {
       paddingVertical: 4,
       borderRadius: 999,
       overflow: 'hidden',
-      color: '#04201D',
-      backgroundColor: theme.colors.accent || '#00D2BE',
+      color: '#FFFFFF',
+      backgroundColor: theme.colors.accent || '#FF2D55',
       fontSize: 12,
       fontWeight: '700',
     },
@@ -529,7 +529,7 @@ function createStyles(theme) {
     },
     statCardEmphasize: {
       borderWidth: 1,
-      borderColor: 'rgba(0,210,190,0.35)',
+      borderColor: 'rgba(255,45,85,0.35)',
     },
     statValue: {
       color: theme.colors.textPrimary,
@@ -537,7 +537,7 @@ function createStyles(theme) {
       fontWeight: '800',
     },
     statValueEmphasize: {
-      color: theme.colors.accent || '#00D2BE',
+      color: theme.colors.accent || '#FF2D55',
     },
     statLabel: {
       color: theme.colors.textMuted,
@@ -568,7 +568,7 @@ function createStyles(theme) {
       padding: theme.spacing.sm,
     },
     heroValue: {
-      color: theme.colors.accent || '#00D2BE',
+      color: theme.colors.accent || '#FF2D55',
       fontSize: 28,
       fontWeight: '800',
     },

@@ -65,7 +65,7 @@ describe('Home header page preferences', () => {
     expect(migrated.find((page) => page.key === 'topic:music')?.enabled).toBe(false);
   });
 
-  test('first enabled page drives landing while Home remains available', () => {
+  test('landing is always the Home hub even if another page is first', () => {
     const prefs = {
       pages: [
         { key: 'A', label: 'For You', enabled: false },
@@ -74,7 +74,7 @@ describe('Home header page preferences', () => {
       ],
     };
 
-    expect(getFirstEnabledPageKey(prefs)).toBe('topic:music');
+    expect(getFirstEnabledPageKey(prefs)).toBe('home');
     expect(getEnabledPages(prefs).map((page) => page.key)).toEqual(
       expect.arrayContaining(['topic:music', 'home'])
     );

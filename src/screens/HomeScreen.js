@@ -773,10 +773,9 @@ const HomeScreen = ({ navigation, route }) => {
     }
   }, [uid, prefs, enabledPages, ribbonPages, firstEnabledPageKey, selectedTab]);
 
-  // Double-tap the bottom Home button → first shown header page (never hard-coded).
+  // Double-tap the bottom Home button → Home hub (not For You).
   useTabReset('Home', () => {
-    const targetKey = enabledPagesRef.current?.[0]?.key || 'home';
-    setSelectedTab(targetKey);
+    setSelectedTab('home');
     setCurrentIndex(0);
     setCurrentDiscoverIndex(0);
     try { flatListRef.current?.scrollToOffset?.({ offset: 0, animated: true }); } catch { }
@@ -1961,8 +1960,8 @@ const HomeScreen = ({ navigation, route }) => {
                     accessibilityRole="button"
                     accessibilityLabel="Follow creator"
                   >
-                    <LinearGradient colors={['#00D2BE', '#00A89E']} style={styles.followBadgeInner}>
-                      <Icon name="add" size={12} color="#0A0A0C" />
+                    <LinearGradient colors={[COLORS.primary, COLORS.primaryDark]} style={styles.followBadgeInner}>
+                      <Icon name="add" size={12} color="#FFFFFF" />
                     </LinearGradient>
                   </TouchableOpacity>
                 );
@@ -2703,7 +2702,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: 'rgba(10,10,12,0.62)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.28)',
+    borderColor: 'rgba(255,45,85,0.28)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.22,
@@ -2711,7 +2710,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   creatorPillActive: {
-    borderColor: 'rgba(0,210,190,0.55)',
+    borderColor: 'rgba(255,45,85,0.55)',
     borderTopColor: 'rgba(255,255,255,0.2)',
     shadowOpacity: 0.28,
     elevation: 4,
@@ -2787,7 +2786,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: 'rgba(10,10,12,0.82)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.28)',
+    borderColor: 'rgba(255,45,85,0.28)',
     zIndex: 1200,
     elevation: 1200,
   },
@@ -2814,10 +2813,10 @@ const styles = StyleSheet.create({
   balanceIcon: { fontSize: responsiveFont(20), marginRight: 8 },
   balanceLabel: { flex: 1, fontSize: responsiveFont(14), color: COLORS.textSecondary },
   balanceValue: { fontSize: responsiveFont(16), fontWeight: 'bold', color: COLORS.textPrimary },
-  menuActionButton: { backgroundColor: '#00D2BE', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8, marginTop: 8, alignItems: 'center' },
-  menuSecondaryButton: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#00D2BE', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8, marginTop: 10, alignItems: 'center' },
-  menuSecondaryButtonText: { color: '#00D2BE', fontWeight: '700', fontSize: 14 },
-  menuButtonText: { color: '#0A0A0C', fontSize: responsiveFont(14), fontWeight: 'bold' },
+  menuActionButton: { backgroundColor: COLORS.primary, paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8, marginTop: 8, alignItems: 'center' },
+  menuSecondaryButton: { backgroundColor: 'transparent', borderWidth: 1, borderColor: COLORS.primary, paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8, marginTop: 10, alignItems: 'center' },
+  menuSecondaryButtonText: { color: COLORS.primary, fontWeight: '700', fontSize: 14 },
+  menuButtonText: { color: '#FFFFFF', fontSize: responsiveFont(14), fontWeight: 'bold' },
   menuLogoutButton: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#FF5A5F', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8, marginTop: 10, alignItems: 'center' },
   menuLogoutText: { color: '#FF5A5F', fontWeight: '700', fontSize: responsiveFont(14) },
 });

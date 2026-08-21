@@ -113,7 +113,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <LinearGradient
-              colors={isF ? ['#27272E', '#3F3F46'] : ['#00D2BE', '#00A89E']}
+              colors={isF ? ['#27272E', '#3F3F46'] : ['#FF2D55', '#E01E45']}
               style={styles.followGradient}
             >
               <Text style={styles.followButtonText}>{isF ? 'Following' : 'Follow'}</Text>
@@ -159,7 +159,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
       onPress={() => navigation.navigate('Blyp', { initialQuery: item.hashtag })}
     >
       <LinearGradient
-        colors={['#00D2BE', '#00A89E']}
+        colors={['#FF2D55', '#E01E45']}
         style={styles.hashtagIcon}
       >
         <Icon  name="pricetag" size={24} color="#0A0A0C"  />
@@ -171,7 +171,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
         </Text>
         {item.trending && (
           <View style={styles.trendingIndicator}>
-            <Icon  name="trending-up" size={12} color="#00D2BE"  />
+            <Icon  name="trending-up" size={12} color="#FF2D55"  />
             <Text style={styles.trendingText}>Trending</Text>
           </View>
         )}
@@ -237,7 +237,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
           <Text style={styles.headerTitle}>Search Results</Text>
         </View>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#00D2BE" />
+          <ActivityIndicator size="large" color="#FF2D55" />
           <Text style={styles.loadingText}>Searching for "{query}"...</Text>
         </View>
       </ScreenContainer>
@@ -271,7 +271,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
           {results?.users && results.users.length > 0 && (
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
-                <Icon  name="people" size={20} color="#00D2BE"  />
+                <Icon  name="people" size={20} color="#FF2D55"  />
                 <Text style={styles.sectionTitle}>Users ({results.users.length})</Text>
               </View>
               <FlatList
@@ -287,7 +287,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
           {results?.posts && results.posts.length > 0 && (
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
-                <Icon  name="grid" size={20} color="#00D2BE"  />
+                <Icon  name="grid" size={20} color="#FF2D55"  />
                 <Text style={styles.sectionTitle}>Posts ({results.posts.length})</Text>
               </View>
               <FlatList
@@ -304,7 +304,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
           {results?.hashtags && results.hashtags.length > 0 && (
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
-                <Icon  name="pricetag" size={20} color="#00D2BE"  />
+                <Icon  name="pricetag" size={20} color="#FF2D55"  />
                 <Text style={styles.sectionTitle}>Hashtags ({results.hashtags.length})</Text>
               </View>
               <FlatList
@@ -320,7 +320,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
           {results?.locations && results.locations.length > 0 && (
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
-                <Icon  name="location" size={20} color="#00D2BE"  />
+                <Icon  name="location" size={20} color="#FF2D55"  />
                 <Text style={styles.sectionTitle}>Locations ({results.locations.length})</Text>
               </View>
               <FlatList
@@ -432,7 +432,7 @@ const styles = StyleSheet.create({
     borderRadius: 15,
   },
   followButtonText: {
-    color: '#0A0A0C',
+    color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '700',
   },
@@ -509,7 +509,7 @@ const styles = StyleSheet.create({
   },
   trendingText: {
     fontSize: 12,
-    color: '#00D2BE',
+    color: '#FF2D55',
     marginLeft: 4,
     fontWeight: '600',
   },

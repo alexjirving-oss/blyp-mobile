@@ -15,8 +15,8 @@ import { COLORS } from '../styles/theme';
  */
 export const BLYP_LOGO_GRADIENT_COLORS = [COLORS.primary, COLORS.primary, COLORS.primaryDark];
 
-/** Warm night coral — matches blyp.world `--blyp-coral` (not neon teal). */
-export const BLYP_WORDMARK_PULSE = '#FF4D6D';
+/** Homepage-mock pink pulse — matches COLORS.primary (not neon teal). */
+export const BLYP_WORDMARK_PULSE = COLORS.primary;
 
 const LOGO_BASE = 26;
 const LOGO_MIN = 24;

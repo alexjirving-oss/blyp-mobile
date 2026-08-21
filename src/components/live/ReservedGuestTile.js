@@ -17,7 +17,7 @@ export default function ReservedGuestTile({ photoUrl = null, label = 'Joining…
           <Icon name="person" size={26} color="rgba(255,255,255,0.88)" />
         </View>
       )}
-      <ActivityIndicator size="small" color={COLORS.primary || '#00D2BE'} style={styles.spinner} />
+      <ActivityIndicator size="small" color={COLORS.primary} style={styles.spinner} />
       <Text style={styles.label} allowFontScaling={false}>
         {String(label || 'Joining…').toUpperCase()}
       </Text>
@@ -40,7 +40,7 @@ const styles = StyleSheet.create({
     borderRadius: 23,
     marginBottom: 8,
     borderWidth: 1.5,
-    borderColor: 'rgba(0,210,190,0.65)',
+    borderColor: 'rgba(255,45,85,0.65)',
   },
   avatarFallback: {
     width: 46,
@@ -49,9 +49,9 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,210,190,0.14)',
+    backgroundColor: 'rgba(255,45,85,0.14)',
     borderWidth: 1.5,
-    borderColor: 'rgba(0,210,190,0.5)',
+    borderColor: 'rgba(255,45,85,0.5)',
   },
   spinner: {
     marginBottom: 6,

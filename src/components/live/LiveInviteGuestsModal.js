@@ -18,7 +18,7 @@ import {
 } from '../../utils/followUtils';
 import { pickPublicLabel, looksLikeRawId } from '../../utils/publicLabel';
 
-const TEAL = '#00D2BE';
+const TEAL = '#FF2D55';
 
 function initials(name) {
   const s = String(name || '').trim().replace(/^@/, '');
@@ -159,7 +159,7 @@ export default function LiveInviteGuestsModal({
         </View>
         <View style={[styles.inviteChip, done && styles.inviteChipDone]}>
           {busy ? (
-            <ActivityIndicator size="small" color="#0A0A0C" />
+            <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
             <Text style={styles.inviteChipText} allowFontScaling={false}>{done ? 'Sent' : 'Invite'}</Text>
           )}
@@ -280,5 +280,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   inviteChipDone: { backgroundColor: 'rgba(255,255,255,0.14)' },
-  inviteChipText: { color: '#0A0A0C', fontWeight: '800', fontSize: 12 },
+  inviteChipText: { color: '#FFFFFF', fontWeight: '800', fontSize: 12 },
 });

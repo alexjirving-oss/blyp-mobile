@@ -66,7 +66,7 @@ export function SentinelStage({
           left: 12,
           borderRadius: 16,
           borderWidth: 1,
-          borderColor: 'rgba(0,210,190,0.35)',
+          borderColor: 'rgba(255, 45, 85,0.35)',
         }}
       />
       <View className="h-24 w-24 items-center justify-center rounded-full border-2 border-blyp-primary bg-blyp-primary/15">

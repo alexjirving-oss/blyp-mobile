@@ -1,39 +1,34 @@
 ﻿import { StyleSheet } from 'react-native';
 import { responsiveFont, responsiveSize } from '../utils/scaleUtils';
 
-// Common color palette — unified with the design system's DARK scheme
-// (see src/styles/designSystem/palettes.ts). Keep these keys in sync with the
-// dark scheme so legacy screens importing COLORS match the warm-night look.
+// Locked to the 2026 homepage mock: pure black canvas + iOS pink signal.
+// Keep keys in sync with src/styles/designSystem/palettes.ts.
 export const COLORS = {
-  // Brand signal — coral (CTA / LIVE / active chrome; sparingly)
-  primary: '#FF4D6D',
-  primaryDark: '#E83D5C',
-  primaryLight: '#FF7A92',
+  // Brand signal — pink (CTA / LIVE / active chrome; sparingly)
+  primary: '#FF2D55',
+  primaryDark: '#E01E45',
+  primaryLight: '#FF5C7A',
 
-  // Secondary stays on brand coral; warm taupe is the soft highlight via `electric`.
-  secondary: '#FF4D6D',
-  secondaryDark: '#E83D5C',
-  secondaryLight: '#FF7A92',
+  secondary: '#FF2D55',
+  secondaryDark: '#E01E45',
+  secondaryLight: '#FF5C7A',
 
-  // Warm taupe secondary (demoted off neon cyan) + soft coral wash
+  // Warm taupe secondary (not neon teal) + soft pink wash
   electric: '#C4B5A5',
-  electricSoft: 'rgba(255,77,109,0.14)',
-  glow: '#FF4D6D',
+  electricSoft: 'rgba(255,45,85,0.16)',
+  glow: '#FF2D55',
 
-  // Background colors (warm charcoal)
-  background: '#12141A',
-  backgroundLight: '#1A1C24',
-  backgroundCard: '#16181F',
-  // Page background
-  pageBackground: '#12141A',
-  // Input / tab-strip surface
-  tabStripBackground: 'rgba(236,234,240,0.06)',
+  // Background colors (true black + raised night surfaces)
+  background: '#000000',
+  backgroundLight: '#141416',
+  backgroundCard: '#121214',
+  pageBackground: '#000000',
+  tabStripBackground: 'rgba(255,255,255,0.06)',
 
-  // Text colors (warm fog / muted)
-  textPrimary: '#ECEAF0',
-  textSecondary: '#9A97A6',
-  textMuted: '#9A97A6',
-  textDisabled: '#6B6878',
+  textPrimary: '#FFFFFF',
+  textSecondary: '#A1A1AA',
+  textMuted: '#8E8E93',
+  textDisabled: '#636366',
 
   // Status colors
   success: '#34D399',
@@ -46,23 +41,21 @@ export const COLORS = {
   black: '#000000',
   transparent: 'transparent',
 
-  // Gradient colors (coral; used sparingly)
-  gradientStart: '#FF4D6D',
-  gradientMiddle: '#FF4D6D',
-  gradientEnd: '#E83D5C',
+  gradientStart: '#FF2D55',
+  gradientMiddle: '#FF2D55',
+  gradientEnd: '#E01E45',
 
-  // Screen background — flat warm charcoal (no neon wash).
-  screenGradientTop: '#12141A',
-  screenGradientMid: '#12141A',
-  screenGradientBot: '#12141A',
+  screenGradientTop: '#000000',
+  screenGradientMid: '#000000',
+  screenGradientBot: '#000000',
 
   // Premium extras
   border: 'rgba(236,234,240,0.12)',
   borderStrong: 'rgba(236,234,240,0.20)',
   divider: 'rgba(236,234,240,0.08)',
-  cardGlass: '#16181F',
-  surface: '#1A1C24',
-  surfaceAlt: '#22242E',
+  cardGlass: '#121214',
+  surface: '#141416',
+  surfaceAlt: '#1C1C1E',
 };
 
 // Common spacing values
@@ -249,9 +242,7 @@ export const COMMON_STYLES = StyleSheet.create({
   },
 });
 
-// Canonical screen background — flat warm charcoal (no neon wash).
-// Import this wherever a full-page background is needed.
-export const SCREEN_GRADIENT_COLORS = ['#12141A', '#12141A', '#12141A'];
+export const SCREEN_GRADIENT_COLORS = ['#000000', '#000000', '#000000'];
 
 export default {
   COLORS,

@@ -18,7 +18,7 @@ import { standingFor } from '../services/transparencyService';
 
 export const BADGE_META = {
   verified: { color: '#34c759', icon: 'checkmark-circle', label: 'Verified' },
-  trusted: { color: '#00d2be', icon: 'shield-checkmark', label: 'Trusted' },
+  trusted: { color: '#FF2D55', icon: 'shield-checkmark', label: 'Trusted' },
   legacy: { color: '#f5a623', icon: 'ribbon', label: 'Established' },
 };
 

@@ -522,8 +522,8 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   title: { color: '#fff', fontSize: 20, fontWeight: '700', marginBottom: 8 },
   msg: { color: '#D4D4D8', textAlign: 'center', marginBottom: 16 },
-  btn: { backgroundColor: '#00D2BE', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12 },
-  btnText: { color: '#0A0A0C', fontWeight: '800' },
+  btn: { backgroundColor: '#FF2D55', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12 },
+  btnText: { color: '#FFFFFF', fontWeight: '800' },
 
   screen: { flex: 1, padding: 16 },
   section: { marginBottom: 16, backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 12, overflow: 'hidden' },
@@ -540,9 +540,9 @@ const styles = StyleSheet.create({
   errorText: { color: '#fca5a5', marginBottom: 8, fontWeight: '700' },
   modalBtns: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 6 },
   modalBtn: { borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, minWidth: 110, alignItems: 'center', justifyContent: 'center' },
-  modalBtnPrimary: { backgroundColor: '#00D2BE', marginLeft: 10 },
+  modalBtnPrimary: { backgroundColor: '#FF2D55', marginLeft: 10 },
   modalBtnSecondary: { backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)' },
-  modalBtnTextPrimary: { color: '#0A0A0C', fontWeight: '800' },
+  modalBtnTextPrimary: { color: '#FFFFFF', fontWeight: '800' },
   modalBtnTextSecondary: { color: '#D4D4D8', fontWeight: '800' },
 });
 

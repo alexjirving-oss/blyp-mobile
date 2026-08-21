@@ -314,13 +314,7 @@ export function StudioJukeboxPanel(props: {
   return (
     <div className={compact ? "jbx is-compact" : "jbx"}>
       <div className="jbx-head">
-        <h3 className="jbx-marquee" aria-label="Jukebox">
-          {Array.from("JUKEBOX").map((ch, i) => (
-            <span key={`${ch}-${i}`} style={{ animationDelay: `${i * 0.16}s` }}>
-              {ch}
-            </span>
-          ))}
-        </h3>
+        <h3 className="jbx-marquee">Jukebox</h3>
         <div className="jbx-head-actions">
           {status?.linked ? (
             <button
@@ -428,7 +422,7 @@ export function StudioJukeboxPanel(props: {
               ? now.artists
               : upNext
                 ? `Up next \u00B7 ${upNext.name}`
-                : "Search a title to load the platter"}
+                : "Search to add a track"}
           </p>
           {now && upNext && upNext.id !== now.id ? (
             <p className="jbx-next">Up next {"\u00B7"} {upNext.name}</p>
@@ -497,7 +491,7 @@ export function StudioJukeboxPanel(props: {
               type="search"
               name="spotify-track-search"
               autoComplete="off"
-              placeholder="Song or artist…"
+              placeholder="Search songs or artists"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {

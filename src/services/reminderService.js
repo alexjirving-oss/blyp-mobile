@@ -259,7 +259,7 @@ async function ensurePermissionAndChannel(Notifications) {
         name: 'Blyp',
         importance: Notifications.AndroidImportance?.HIGH ?? 4,
         vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#00D2BE',
+        lightColor: '#FF2D55',
         sound: soundName,
       });
     }

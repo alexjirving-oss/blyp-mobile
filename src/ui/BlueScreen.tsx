@@ -3,10 +3,10 @@ import { Platform, StatusBar, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 /**
- * Near-black page chrome — editorial #0A0A0C (PETRONAS teal / aqua accents sit on top).
- * This is the authoritative page background used across all screens.
+ * True-black page chrome — locked to the 2026 homepage mock (`#000000`).
+ * Pink `#FF2D55` accents sit on top via COLORS.primary, not this surface.
  */
-export const BLYP_BLUE_BG = "#0A0A0C";
+export const BLYP_BLUE_BG = "#000000";
 
 /**
  * BlueScreen

@@ -37,6 +37,13 @@ export type StageLayoutDef = {
 
 export const STAGE_LAYOUTS: StageLayoutDef[] = [
   {
+    id: "host-top-9",
+    label: "Host + 9",
+    blurb: "Host band · 3×3 guests · click cells to Nuke",
+    orientations: ["portrait"],
+    guestSlots: 9,
+  },
+  {
     id: "solo",
     label: "Solo",
     blurb: "Host fills the whole program",
@@ -49,13 +56,6 @@ export const STAGE_LAYOUTS: StageLayoutDef[] = [
     blurb: "Host on top · guest strip below",
     orientations: ["portrait", "landscape"],
     guestSlots: 4,
-  },
-  {
-    id: "host-top-9",
-    label: "Host + 9",
-    blurb: "Host band · 3×3 guests · click cells to Nuke",
-    orientations: ["portrait"],
-    guestSlots: 9,
   },
   {
     id: "split-stack",
@@ -158,8 +158,7 @@ export function layoutDef(id: StageLayoutId): StageLayoutDef {
 export function defaultLayoutFor(
   orientation: DeskOrientation,
 ): StageLayoutId {
-  void orientation;
-  return "solo";
+  return orientation === "landscape" ? "solo" : "host-top-9";
 }
 
 export function coerceLayout(

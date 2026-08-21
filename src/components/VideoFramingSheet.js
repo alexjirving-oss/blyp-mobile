@@ -328,7 +328,7 @@ const styles = StyleSheet.create({
   },
   modeBtnActive: { backgroundColor: COLORS.primary },
   modeText: { color: 'rgba(255,255,255,0.75)', fontSize: 13, fontWeight: '600' },
-  modeTextActive: { color: '#0A0A0C' },
+  modeTextActive: { color: '#FFFFFF' },
   iconBtn: {
     width: 36,
     height: 36,

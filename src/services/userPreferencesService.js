@@ -623,8 +623,9 @@ export function getHomeRibbonPages(pages) {
   return ribbon;
 }
 
-export function getFirstEnabledPageKey(prefs) {
-  return getEnabledPages(prefs)[0]?.key || HOME_PAGE_KEY;
+/** Landing is always the Home hub, not For You or a topic page. */
+export function getFirstEnabledPageKey(_prefs) {
+  return HOME_PAGE_KEY;
 }
 
 export function interestLabels(ids) {

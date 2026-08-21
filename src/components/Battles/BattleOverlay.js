@@ -485,7 +485,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: responsiveSize(28),
   },
   startBtnText: {
-    color: '#0A0A0C',
+    color: '#FFFFFF',
     fontWeight: '900',
     fontSize: responsiveFont(15),
   },
@@ -519,7 +519,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.2)',
   },
   voteLeft: {
-    borderColor: 'rgba(0,210,190,0.45)',
+    borderColor: 'rgba(255, 45, 85,0.45)',
   },
   voteRight: {
     borderColor: 'rgba(255,90,69,0.45)',

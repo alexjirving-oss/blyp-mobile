@@ -43,4 +43,16 @@ describe('LiveStreamViewer production regression', () => {
       /Platform\.OS === 'android' && !guestMode && !!NativeIVSPlayerView/,
     );
   });
+
+  it('keeps the host IVS tile in one tree across Studio solo / host-top-9 swaps', () => {
+    const source = fs.readFileSync(liveStreamViewerPath, 'utf8');
+    expect(source).toMatch(/Keep slot 0 in this tree/);
+    expect(source).toMatch(/guestLayoutMode = DEFAULT_LIVE_LAYOUT_MODE/);
+    expect(source).not.toMatch(
+      /if \(guestLayoutMode === LIVE_LAYOUT_MODES\.SOLO\) \{\s*return \(/,
+    );
+    expect(source).not.toMatch(
+      /if \(guestLayoutMode === LIVE_LAYOUT_MODES\.HOST_TOP_9\) \{\s*return \(/,
+    );
+  });
 });

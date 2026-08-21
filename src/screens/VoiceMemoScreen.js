@@ -188,7 +188,7 @@ const VoiceMemoScreen = () => {
             activeOpacity={0.8}
           >
             <LinearGradient
-              colors={isRecording ? ['#ef4444', '#dc2626'] : ['#00D2BE', '#00D2BE', '#00A89E']}
+              colors={isRecording ? ['#ef4444', '#dc2626'] : ['#FF2D55', '#FF2D55', '#E01E45']}
               style={styles.recordGradient}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
@@ -212,7 +212,7 @@ const VoiceMemoScreen = () => {
               <Icon  
                 name={isPlaying ? 'pause' : 'play'} 
                 size={32} 
-                color="#00D2BE" 
+                color="#FF2D55" 
                />
             </TouchableOpacity>
             
@@ -290,7 +290,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     borderRadius: 100,
     borderWidth: 2,
-    borderColor: '#00D2BE',
+    borderColor: '#FF2D55',
   },
   pulseRing1: {
     width: 120,
@@ -340,7 +340,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 32,
     borderWidth: 2,
-    borderColor: '#00D2BE',
+    borderColor: '#FF2D55',
   },
   playbackActions: {
     flexDirection: 'row',

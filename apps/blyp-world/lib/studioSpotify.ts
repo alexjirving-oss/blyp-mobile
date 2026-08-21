@@ -806,8 +806,8 @@ export async function captureStudioTabAudio(): Promise<boolean> {
 
 /**
  * Local jukebox files mix in AudioContext (no picker).
- * Spotify is DRM — tab-share is required. Prompt only from a click
- * (GO LIVE / Play / Share tab audio). Never attach a silent SDK element.
+ * Spotify IVS mix-out needs tab-share — prompt only from explicit clicks
+ * (Share tab audio / GO LIVE). Play uses Web Playback SDK locally.
  */
 export async function ensureJukeboxPublishMix(opts?: {
   allowTabCapture?: boolean;
@@ -926,8 +926,7 @@ export async function ensureStudioSpotifyPlayer(): Promise<string> {
 }
 
 async function playOnStudioDevice(uris: string[], offsetUri?: string) {
-  const mixed =
-    hasStudioTabAudio() || (await captureStudioTabAudio());
+  const tabMixed = hasStudioTabAudio();
   const deviceId = await ensureStudioSpotifyPlayer();
   studioAudio.stopMusic();
   try {
@@ -947,7 +946,7 @@ async function playOnStudioDevice(uris: string[], offsetUri?: string) {
     ready: true,
     deviceId,
     paused: false,
-    error: mixed ? null : TAB_AUDIO_REQUIRED,
+    error: tabMixed ? null : TAB_AUDIO_REQUIRED,
   });
 }
 
@@ -976,7 +975,7 @@ export async function pauseSpotifyPlayback(): Promise<void> {
 }
 
 export async function resumeSpotifyPlayback(): Promise<void> {
-  const mixed = hasStudioTabAudio() || (await captureStudioTabAudio());
+  const tabMixed = hasStudioTabAudio();
   const deviceId = await ensureStudioSpotifyPlayer();
   try {
     if (sdkPlayer) await sdkPlayer.resume();
@@ -988,7 +987,7 @@ export async function resumeSpotifyPlayback(): Promise<void> {
     }
     emitPlayback({
       paused: false,
-      error: mixed ? null : TAB_AUDIO_REQUIRED,
+      error: tabMixed ? null : TAB_AUDIO_REQUIRED,
     });
   } catch (e) {
     throw new Error(e instanceof Error ? e.message : "Could not resume Spotify");

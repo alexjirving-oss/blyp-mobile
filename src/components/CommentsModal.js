@@ -878,7 +878,7 @@ const CommentsModal = ({
                   disabled={!newComment.trim()}
                 >
                   <LinearGradient
-                    colors={newComment.trim() ? ['#00D2BE', '#00A89E'] : ['#27272E', '#27272E']}
+                    colors={newComment.trim() ? ['#FF2D55', '#E01E45'] : ['#27272E', '#27272E']}
                     style={styles.sendGradient}
                   >
                     <Icon name="send" size={18} color={newComment.trim() ? '#0A0A0C' : '#71717A'} />

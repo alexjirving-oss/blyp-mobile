@@ -1471,7 +1471,7 @@ const styles = StyleSheet.create({
   },
   popularCard: {
     borderWidth: 1.5,
-    borderColor: '#00D2BE',
+    borderColor: COLORS.primary,
   },
   packageGradient: {
     padding: 20,
@@ -1483,12 +1483,12 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    backgroundColor: '#00D2BE',
+    backgroundColor: COLORS.primary,
     paddingVertical: 5,
     alignItems: 'center',
   },
   popularText: {
-    color: '#000',
+    color: '#FFFFFF',
     fontSize: 10,
     fontWeight: '800',
     letterSpacing: 1,

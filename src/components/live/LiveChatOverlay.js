@@ -2,13 +2,22 @@ import React, { useMemo, useEffect } from 'react';
 import { View, Text, Image, FlatList, StyleSheet, useWindowDimensions, Pressable } from 'react-native';
 import { pickPublicLabel } from '../../utils/publicLabel';
 
-const TEAL = '#00D2BE';
+import { COLORS } from '../../styles/theme';
+
+const PINK = COLORS.primary;
 
 /**
- * Cinematic live chat overlay — soft ink bubbles, teal handles.
+ * Live chat overlay — black bubbles, pink handles.
  * Newest message at the bottom; older rows fade upward.
  */
-export default function LiveChatOverlay({ messages = [], bottomInset = 0, maxVisible = 6, onPressUser, onLayoutHeight }) {
+export default function LiveChatOverlay({
+  messages = [],
+  bottomInset = 0,
+  maxVisible = 6,
+  onPressUser,
+  onLayoutHeight,
+  embedded = false,
+}) {
   const { height: winHeight } = useWindowDimensions();
 
   const data = useMemo(() => {
@@ -23,7 +32,7 @@ export default function LiveChatOverlay({ messages = [], bottomInset = 0, maxVis
     }
   }, [data.length, onLayoutHeight]);
 
-  if (data.length === 0) return null;
+  if (data.length === 0 && !embedded) return null;
 
   const renderItem = ({ item, index }) => {
     const username = pickPublicLabel(
@@ -38,7 +47,7 @@ export default function LiveChatOverlay({ messages = [], bottomInset = 0, maxVis
     );
     const RowComponent = onPressUser ? Pressable : View;
     const rowProps = onPressUser
-      ? { onPress: () => onPressUser(item), android_ripple: { color: 'rgba(0,210,190,0.18)', borderless: false } }
+      ? { onPress: () => onPressUser(item), android_ripple: { color: 'rgba(255,45,85,0.18)', borderless: false } }
       : {};
     const fade = Math.max(0.28, 1 - index * 0.14);
     return (
@@ -63,11 +72,14 @@ export default function LiveChatOverlay({ messages = [], bottomInset = 0, maxVis
     );
   };
 
-  const maxHeight = Math.round(winHeight * 0.22);
+  const maxHeight = embedded ? undefined : Math.round(winHeight * 0.22);
 
   return (
     <View
-      style={[styles.container, { bottom: bottomInset, maxHeight }]}
+      style={[
+        embedded ? styles.containerEmbedded : styles.container,
+        embedded ? null : { bottom: bottomInset, maxHeight },
+      ]}
       pointerEvents="box-none"
       onLayout={(e) => {
         if (typeof onLayoutHeight === 'function') {
@@ -75,7 +87,7 @@ export default function LiveChatOverlay({ messages = [], bottomInset = 0, maxVis
         }
       }}
     >
-      <View style={{ maxHeight, overflow: 'hidden' }}>
+      <View style={{ maxHeight: maxHeight || '100%', overflow: 'hidden', flex: embedded ? 1 : undefined }}>
         <FlatList
           data={data}
           inverted
@@ -102,6 +114,11 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     justifyContent: 'flex-end',
   },
+  containerEmbedded: {
+    flex: 1,
+    overflow: 'hidden',
+    justifyContent: 'flex-end',
+  },
   listContent: {
     paddingTop: 6,
   },
@@ -117,12 +134,12 @@ const styles = StyleSheet.create({
     marginRight: 7,
     backgroundColor: 'rgba(10,10,12,0.7)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.4)',
+    borderColor: 'rgba(255,45,85,0.4)',
   },
   avatarPlaceholder: {
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,210,190,0.18)',
+    backgroundColor: 'rgba(255,45,85,0.18)',
   },
   avatarInitial: {
     color: '#fff',
@@ -145,7 +162,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   username: {
-    color: TEAL,
+    color: PINK,
     fontSize: 12,
     fontWeight: '900',
     letterSpacing: 0.15,

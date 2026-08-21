@@ -156,7 +156,7 @@ export function Grid9CombatVfxOverlay({
     active.kind === 'heal'
       ? '#4ADE80'
       : active.kind === 'shield'
-        ? '#00D2BE'
+        ? '#FF2D55'
         : '#FF3B30';
 
   const burstScale = impact.interpolate({
@@ -209,13 +209,13 @@ export function Grid9CombatVfxOverlay({
               active.kind === 'heal'
                 ? 'rgba(255,107,181,0.55)'
                 : active.kind === 'shield'
-                  ? 'rgba(0,210,190,0.45)'
+                  ? 'rgba(255, 45, 85,0.45)'
                   : 'rgba(255,80,20,0.55)',
             borderColor:
               active.kind === 'heal'
                 ? '#FF6BB5'
                 : active.kind === 'shield'
-                  ? '#00D2BE'
+                  ? '#FF2D55'
                   : '#FF8A1F',
           },
         ]}

@@ -201,7 +201,7 @@ const styles = StyleSheet.create({
     paddingVertical: responsiveSize(6),
     borderRadius: 999,
   },
-  coinPillText: { color: '#0A0A0C', fontWeight: '900', fontSize: responsiveFont(15) },
+  coinPillText: { color: '#FFFFFF', fontWeight: '900', fontSize: responsiveFont(15) },
   balance: { color: COLORS.textMuted, fontSize: responsiveFont(12), marginTop: responsiveSize(6) },
   error: { color: '#F87171', fontSize: responsiveFont(13), marginTop: responsiveSize(12), fontWeight: '600' },
   cta: {

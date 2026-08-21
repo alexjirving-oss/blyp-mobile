@@ -151,7 +151,7 @@ const PersonNotificationSettingsScreen = ({ navigation, route }) => {
               <Text style={styles.rowSubtitle}>{meta.subtitle}</Text>
             </View>
             {busy === 'mode' && selected ? (
-              <ActivityIndicator color="#00A89E" />
+              <ActivityIndicator color="#E01E45" />
             ) : (
               <View style={[styles.radio, selected && styles.radioOn]} />
             )}
@@ -182,7 +182,7 @@ const PersonNotificationSettingsScreen = ({ navigation, route }) => {
                   </Text>
                 </View>
                 {busy === key ? (
-                  <ActivityIndicator color="#00A89E" />
+                  <ActivityIndicator color="#E01E45" />
                 ) : (
                   <View style={styles.triState}>
                     {[
@@ -267,7 +267,7 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   presetRowSelected: {
-    borderColor: '#00A89E',
+    borderColor: '#E01E45',
   },
   row: {
     backgroundColor: '#141418',
@@ -291,8 +291,8 @@ const styles = StyleSheet.create({
     borderColor: '#3F3F46',
   },
   chipOn: {
-    borderColor: '#00A89E',
-    backgroundColor: 'rgba(0,168,158,0.18)',
+    borderColor: '#E01E45',
+    backgroundColor: 'rgba(224, 30, 69,0.18)',
   },
   chipText: { color: '#A1A1AA', fontSize: 12, fontWeight: '600' },
   chipTextOn: { color: '#F5F5F7' },
@@ -304,8 +304,8 @@ const styles = StyleSheet.create({
     borderColor: '#3F3F46',
   },
   radioOn: {
-    borderColor: '#00A89E',
-    backgroundColor: '#00A89E',
+    borderColor: '#E01E45',
+    backgroundColor: '#E01E45',
   },
   clearRow: {
     backgroundColor: '#1C1214',

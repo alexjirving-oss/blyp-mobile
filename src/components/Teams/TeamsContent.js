@@ -174,7 +174,7 @@ const TeamsContent = ({ navigation }) => {
           <View>
             <View style={styles.hero}>
               <LinearGradient
-                colors={['rgba(0,210,190,0.28)', 'rgba(0,168,158,0.05)', 'transparent']}
+                colors={['rgba(255, 45, 85,0.28)', 'rgba(224, 30, 69,0.05)', 'transparent']}
                 style={StyleSheet.absoluteFill}
               />
               <Text style={styles.heroEyebrow}>Teams</Text>
@@ -258,7 +258,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: '#0E1214',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.22)',
+    borderColor: 'rgba(255, 45, 85,0.22)',
     padding: 18,
     marginBottom: 16,
     minHeight: 120,
@@ -277,7 +277,7 @@ const styles = StyleSheet.create({
   actionBtnInner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12 },
   actionPrimary: { backgroundColor: COLORS.primary },
   actionPrimaryText: { color: '#001b18', fontWeight: '800', fontSize: 13 },
-  actionGhost: { borderWidth: 1, borderColor: COLORS.primary, backgroundColor: 'rgba(0,210,190,0.06)' },
+  actionGhost: { borderWidth: 1, borderColor: COLORS.primary, backgroundColor: 'rgba(255, 45, 85,0.06)' },
   actionGhostText: { color: COLORS.primary, fontWeight: '700', fontSize: 12 },
   sectionLabel: { color: COLORS.textMuted, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 },
   card: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: COLORS.backgroundCard, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: COLORS.border },

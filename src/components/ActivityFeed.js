@@ -93,7 +93,7 @@ const ActivityFeed = ({ navigation }) => {
       case ACTIVITY_TYPES.COMMENT:
         return { name: 'chatbubble-outline', color: '#f59e0b' };
       case ACTIVITY_TYPES.FOLLOW:
-        return { name: 'person-add-outline', color: '#00D2BE' };
+        return { name: 'person-add-outline', color: '#FF2D55' };
       default:
         return { name: 'notifications-outline', color: '#6b7280' };
     }

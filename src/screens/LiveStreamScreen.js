@@ -57,6 +57,7 @@ import {
 import { useLockPortraitWhileFocused } from '../utils/lockPortraitWhileFocused';
 import LiveStreamViewer from '../components/LiveStreamViewer';
 import StudioWatchOverlays from '../components/studio/StudioWatchOverlays';
+import HostTop9WatchChrome, { HostTop9GiftRail } from '../components/live/HostTop9WatchChrome';
 import CommentsModal from '../components/CommentsModal';
 import GiftSystem from '../components/GiftSystem';
 import LiveGiftOverlay from '../components/live/LiveGiftOverlay';
@@ -120,6 +121,8 @@ import { useLiveSafetyScanner } from '../hooks/useLiveSafetyScanner';
 import SafetyGateModal from '../components/safety/SafetyGateModal';
 import { ensureSafetyGate } from '../services/safety/ensureSafetyGate';
 import { pickPublicLabel } from '../utils/publicLabel';
+import { parseStudioOverlayFeedNative } from '../lib/studioOverlayFeedNative';
+import BlypCoinService from '../services/BlypCoinService';
 // Live Service for Firestore registration
 import {
   createStream as createFirestoreStream,
@@ -135,6 +138,7 @@ import {
 import {
   LIVE_LAYOUT_MODES,
   LIVE_LAYOUT_OPTIONS,
+  DEFAULT_LIVE_LAYOUT_MODE,
   resolveLiveLayoutMode,
   layoutUsesBottomTray,
   guestsPerTrayPage,
@@ -598,6 +602,9 @@ const LiveStreamScreen = (props) => {
   const [streamStartTime, setStreamStartTime] = useState(null);
   const [viewCount, setViewCount] = useState(0);
   const [heartCount, setHeartCount] = useState(0);
+  const [shareCount, setShareCount] = useState(0);
+  const [studioOverlayFeed, setStudioOverlayFeed] = useState(null);
+  const [hostTop9Expanded, setHostTop9Expanded] = useState(false);
   const [comments, setComments] = useState([]);
   // Optimistic live-chat bubbles shown the instant you tap Send, reconciled away
   // when the real Firestore comment echoes back (or removed on send failure).
@@ -674,7 +681,7 @@ const LiveStreamScreen = (props) => {
   // visible row. ("collapsed" is the one-row tray, not the hidden state.)
   const [hostGuestTrayMode, setHostGuestTrayMode] = useState('collapsed'); // expanded | collapsed | hidden
   /** Compositional layout (sticky slots apply inside each mode). Mirrored to viewers. */
-  const [guestLayoutMode, setGuestLayoutMode] = useState(LIVE_LAYOUT_MODES.BOTTOM_GRID);
+  const [guestLayoutMode, setGuestLayoutMode] = useState(DEFAULT_LIVE_LAYOUT_MODE);
   const prevHostGuestCountRef = useRef(0);
   const [showLayoutSwitcher, setShowLayoutSwitcher] = useState(false);
   const hostGuestPagerScrollRef = useRef(null);
@@ -2048,6 +2055,11 @@ const LiveStreamScreen = (props) => {
           }),
         );
       }
+      const overlayFeed = data?.studioOverlayFeed;
+      setStudioOverlayFeed(overlayFeed && typeof overlayFeed === 'object' ? overlayFeed : null);
+      if (typeof data?.shares === 'number' && Number.isFinite(data.shares)) {
+        setShareCount((prev) => Math.max(prev, Math.max(0, data.shares)));
+      }
       const bid = data?.activeBattleId ? String(data.activeBattleId) : null;
       setMirroredBattleId((prev) => (prev === bid ? prev : bid));
     });
@@ -3245,6 +3257,7 @@ const LiveStreamScreen = (props) => {
       await Share.share({ message, url });
       try {
         await bumpLiveEngagement(String(activeStreamId), { shares: 1 });
+        setShareCount((prev) => prev + 1);
       } catch {
         // ignore
       }
@@ -3671,6 +3684,62 @@ const LiveStreamScreen = (props) => {
     return labels;
   }, [comments, hostUid, hostUserDoc, incomingGiftEvent, liveGuests]);
 
+  const dailyTop3 = useMemo(() => {
+    const rows = Object.entries(giftTotalsByUser || {})
+      .map(([userId, t]) => ({
+        userId,
+        name: publicLabelsByUser[userId] || 'Viewer',
+        coins: Number(t?.coins) || 0,
+      }))
+      .filter((r) => r.coins > 0)
+      .sort((a, b) => b.coins - a.coins)
+      .slice(0, 3);
+    const out = [...rows];
+    while (out.length < 3) {
+      out.push({ userId: `empty-${out.length}`, name: '—', coins: 0, empty: true });
+    }
+    return out;
+  }, [giftTotalsByUser, publicLabelsByUser]);
+
+  const viewerAvatars = useMemo(() => {
+    const urls = [];
+    const seen = new Set();
+    const add = (url) => {
+      const u = String(url || '').trim();
+      if (!u || seen.has(u)) return;
+      seen.add(u);
+      urls.push(u);
+    };
+    (liveGuests || []).forEach((g) => add(g?.photoUrl || g?.photoURL));
+    (mergedComments || []).forEach((c) => add(c?.avatar || c?.photoUrl || c?.photoURL));
+    return urls.slice(0, 3);
+  }, [liveGuests, mergedComments]);
+
+  const liveGoal = useMemo(() => {
+    const feed = parseStudioOverlayFeedNative(studioOverlayFeed);
+    return {
+      label: feed?.goalLabel || 'Live Goal',
+      pct: Number(feed?.goalPct) || 0,
+    };
+  }, [studioOverlayFeed]);
+
+  const giftAlert = useMemo(() => {
+    if (!incomingGiftEvent) return null;
+    const sender = incomingGiftEvent.sender || {};
+    return {
+      name: pickPublicLabel(sender, { uid: sender.userId, fallback: 'Viewer' }),
+      gift: incomingGiftEvent.giftName || incomingGiftEvent.name || incomingGiftEvent.giftId || 'a gift',
+    };
+  }, [incomingGiftEvent]);
+
+  const watchGiftTypes = useMemo(() => {
+    try {
+      return BlypCoinService.getGiftTypes() || [];
+    } catch {
+      return [];
+    }
+  }, []);
+
   // Build the guest roster for the sheet (name/avatar from the mirrored roster).
   const guestControlList = useMemo(() => {
     const list = Array.isArray(liveGuests) ? liveGuests : [];
@@ -3987,11 +4056,84 @@ const LiveStreamScreen = (props) => {
     }
 
     const showAuthOverlay = !authReady || authLoading;
+    const useHostTop9Watch =
+      !activeBattleId && guestLayoutMode === LIVE_LAYOUT_MODES.HOST_TOP_9;
 
     return (
       <View style={styles.container}>
         <StatusBar style="light" />
 
+        {useHostTop9Watch ? (
+          <HostTop9WatchChrome
+            topInset={LIVE_TOP_INSET}
+            expanded={hostTop9Expanded}
+            dailyTop3={dailyTop3}
+            onPressExplore={() => navigation.navigate('Rankings')}
+            header={
+              <LiveViewerHeader
+                embedded
+                variant="hostTop9"
+                hostName={normalizeHandle(resolvedHostName || 'Host')}
+                hostPhotoUrl={resolvedHostPhotoUrl}
+                viewCount={viewCount}
+                heartCount={heartCount}
+                viewerAvatars={viewerAvatars}
+                onPressReport={() => setLiveReportVisible(true)}
+                onPressMore={openLiveSafetyMenu}
+                onPressClose={goToSummary}
+              />
+            }
+            footer={
+              <LiveBottomBar
+                variant="hostTop9"
+                onPressComment={() => setCommentsModalVisible(true)}
+                onPressLike={sendHeart}
+                onPressShare={shareLive}
+                onPressGift={promptGiftRecipient}
+                showGames={false}
+                likeCount={heartCount}
+                shareCount={shareCount}
+                likeScale={scale}
+              />
+            }
+            stage={(layout) => (
+              <LiveStreamViewer
+                streamId={routeStreamId}
+                hostUid={hostUid}
+                guestRoster={liveGuests}
+                guestLayoutMode={guestLayoutMode}
+                giftTotalsByUser={giftTotalsByUser}
+                battleMode={false}
+                style={{ width: '100%', height: layout.hostH + layout.gridH }}
+                overlayBottomInset={0}
+                onGuestPagerLayout={onViewerGuestPagerLayout}
+                onError={handleViewerPlaybackError}
+                hostBandHeight={layout.hostH}
+                hostExpanded={hostTop9Expanded}
+                watchViewCount={viewCount}
+                liveGoal={liveGoal}
+                giftAlert={giftAlert}
+                onToggleFullscreen={() => setHostTop9Expanded((v) => !v)}
+                onHostPress={sendHeart}
+              />
+            )}
+            chat={
+              <LiveChatOverlay
+                embedded
+                messages={mergedComments}
+                maxVisible={5}
+                onPressUser={onPressCommenter}
+              />
+            }
+            giftRail={
+              <HostTop9GiftRail
+                gifts={watchGiftTypes}
+                onPressGift={() => promptGiftRecipient()}
+              />
+            }
+          />
+        ) : (
+          <>
         {/* Bottom-anchored live chat. Host stacks chat ABOVE the guest tray;
             mirror that here so the tray sits on the bottom bar — not mid-screen
             above a fixed 28% chat band (which looked like a half-page split). */}
@@ -4026,19 +4168,6 @@ const LiveStreamScreen = (props) => {
           }
         />
 
-        {/* Tap anywhere on the video to send a like (single tap, per product).
-            CRITICAL: this catcher now eats single taps wherever it overlaps an
-            interactive element, so it is bounded to the open video area only —
-            it stops above the bottom region (comments + guest tray) and the
-            header sits on top of it (rendered later, pointerEvents box-none), so
-            header controls and tray tiles still receive their taps.
-            The guest tray is anchored at the bottom and grows
-            UPWARD (its "Join" tile is the top-left, i.e. highest, tile), so a
-            fixed bottom inset let the catcher cover the Join button once the
-            comments bar + tray pushed it above that line — making "Join" do
-            nothing. Stop the catcher above the live bottom region (comments
-            overlay + guest tray) so every tray tile stays tappable, with the
-            original 180px reserved as a floor and a small safety buffer. */}
         <GestureHandlerRootView
           style={[
             styles.viewerDoubleTapCatcher,
@@ -4055,7 +4184,6 @@ const LiveStreamScreen = (props) => {
           </TapGestureHandler>
         </GestureHandlerRootView>
 
-        {/* Unified TikTok/IG-class live header */}
         <LiveViewerHeader
           topInset={LIVE_TOP_INSET}
           hostName={normalizeHandle(resolvedHostName || 'Host')}
@@ -4066,6 +4194,50 @@ const LiveStreamScreen = (props) => {
           onPressMore={openLiveSafetyMenu}
           onPressClose={goToSummary}
         />
+
+        <LiveReactionsHearts
+          burst={reactionBurst}
+          bottomOffset={(viewerCommentsOverlayHeight || 0) + (viewerGuestPagerHeight || 0) + 68}
+          rightOffset={16}
+        />
+
+        <LinearGradient
+          colors={['transparent', 'rgba(10,10,12,0.18)', 'rgba(10,10,12,0.72)']}
+          locations={[0, 0.45, 1]}
+          pointerEvents="none"
+          style={[
+            styles.viewerBottomVignette,
+            { height: Math.max(168, (viewerCommentsOverlayHeight || 0) + (viewerGuestPagerHeight || 0) + 88) },
+          ]}
+        />
+
+        <LiveReactionTray
+          style={[
+            styles.viewerReactionTray,
+            { bottom: (viewerCommentsOverlayHeight || 0) + (viewerGuestPagerHeight || 0) + 14 },
+          ]}
+          onReact={(emoji) => triggerReaction(emoji)}
+        />
+
+        <View
+          style={styles.commentsContainer}
+          pointerEvents="box-none"
+          onLayout={(e) => setViewerCommentsOverlayHeight(e?.nativeEvent?.layout?.height || 0)}
+        >
+          <LiveBottomBar
+            onPressComment={() => setCommentsModalVisible(true)}
+            onPressLike={sendHeart}
+            onPressShare={shareLive}
+            onPressGift={promptGiftRecipient}
+            onPressGames={openLiveGames}
+            showGames={liveGamesAvailable}
+            gamesActive={!!(gamesOpen || showArtillery)}
+            likeCount={heartCount}
+            likeScale={scale}
+          />
+        </View>
+          </>
+        )}
 
         <ReportModal
           visible={liveReportVisible}
@@ -4092,31 +4264,9 @@ const LiveStreamScreen = (props) => {
           }}
         />
 
-        <LiveReactionsHearts
-          burst={reactionBurst}
-          bottomOffset={(viewerCommentsOverlayHeight || 0) + (viewerGuestPagerHeight || 0) + 68}
-          rightOffset={16}
-        />
-
-        <LinearGradient
-          colors={['transparent', 'rgba(10,10,12,0.18)', 'rgba(10,10,12,0.72)']}
-          locations={[0, 0.45, 1]}
-          pointerEvents="none"
-          style={[
-            styles.viewerBottomVignette,
-            { height: Math.max(168, (viewerCommentsOverlayHeight || 0) + (viewerGuestPagerHeight || 0) + 88) },
-          ]}
-        />
-
-        {/* Sits ABOVE the guest tray (not just the comment bar) so the emoji
-            rail never overlaps the bottom row of guest tiles. */}
-        <LiveReactionTray
-          style={[
-            styles.viewerReactionTray,
-            { bottom: (viewerCommentsOverlayHeight || 0) + (viewerGuestPagerHeight || 0) + 14 },
-          ]}
-          onReact={(emoji) => triggerReaction(emoji)}
-        />
+        {useHostTop9Watch ? (
+          <LiveReactionsHearts burst={reactionBurst} bottomOffset={72} rightOffset={16} />
+        ) : null}
 
         {showAuthOverlay && (
           <View style={styles.viewerAuthOverlay}>
@@ -4124,25 +4274,6 @@ const LiveStreamScreen = (props) => {
             <Text style={[styles.errorMessage, { marginTop: 12 }]}>Preparing stream...</Text>
           </View>
         )}
-
-        {/* Viewer bottom bar overlay */}
-        <View
-          style={styles.commentsContainer}
-          pointerEvents="box-none"
-          onLayout={(e) => setViewerCommentsOverlayHeight(e?.nativeEvent?.layout?.height || 0)}
-        >
-          <LiveBottomBar
-            onPressComment={() => setCommentsModalVisible(true)}
-            onPressLike={sendHeart}
-            onPressShare={shareLive}
-            onPressGift={promptGiftRecipient}
-            onPressGames={openLiveGames}
-            showGames={liveGamesAvailable}
-            gamesActive={!!(gamesOpen || showArtillery)}
-            likeCount={heartCount}
-            likeScale={scale}
-          />
-        </View>
 
         <CommentsModal
           visible={commentsModalVisible}
@@ -4791,7 +4922,7 @@ const LiveStreamScreen = (props) => {
                   <Text style={styles.countdownText}>{countdownValue > 0 ? countdownValue : ''}</Text>
                 ) : (
                   <View style={styles.startingInner}>
-                    <ActivityIndicator size="large" color="#00D2BE" />
+                    <ActivityIndicator size="large" color={COLORS.primary} />
                     <Text style={styles.startingText} allowFontScaling={false}>
                       Going live…
                     </Text>
@@ -4841,7 +4972,7 @@ const LiveStreamScreen = (props) => {
                     activeOpacity={0.85}
                     accessibilityLabel={`Open ${STAGE_DESK_NAME}`}
                   >
-                    <Icon name="options" size={18} color="#00D2BE" />
+                    <Icon name="options" size={18} color={COLORS.primary} />
                     <Text style={styles.preLiveDeskBtnText} allowFontScaling={false}>
                       {STAGE_DESK_NAME}
                     </Text>
@@ -4967,7 +5098,7 @@ const LiveStreamScreen = (props) => {
                               setShowLayoutSwitcher(false);
                             }}
                           >
-                            <Icon name={opt.icon} size={22} color={active ? '#00D2BE' : '#fff'} />
+                            <Icon name={opt.icon} size={22} color={active ? COLORS.primary : '#fff'} />
                             <Text
                               style={[styles.layoutOptionLabel, active && styles.layoutOptionLabelActive]}
                               allowFontScaling={false}
@@ -5028,7 +5159,7 @@ const LiveStreamScreen = (props) => {
                           <Icon
                             name="game-controller"
                             size={20}
-                            color={(gamesOpen || showArtillery) ? '#00D2BE' : '#FDE68A'}
+                            color={(gamesOpen || showArtillery) ? COLORS.primary : '#FDE68A'}
                           />
                         </View>
                         <Text style={styles.hostControlLabel} allowFontScaling={false}>Games</Text>
@@ -5042,7 +5173,7 @@ const LiveStreamScreen = (props) => {
                       accessibilityLabel={`Open ${STAGE_DESK_NAME}`}
                     >
                       <View style={[styles.hostControlCircle, stageDeskOpen && styles.hostControlCircleActive]}>
-                        <Icon name="options" size={20} color={stageDeskOpen ? '#00D2BE' : '#00D2BE'} />
+                        <Icon name="options" size={20} color={stageDeskOpen ? COLORS.primary : COLORS.primary} />
                       </View>
                       <Text style={styles.hostControlLabel} allowFontScaling={false}>Desk</Text>
                     </TouchableOpacity>
@@ -5377,7 +5508,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: COLORS.background,
     borderWidth: 1,
-    borderColor: 'rgba(0, 210, 190, 0.35)',
+    borderColor: 'rgba(255, 45, 85, 0.35)',
   },
   ivsComposeTileEqual: {
     width: '30%',
@@ -5388,7 +5519,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: COLORS.background,
     borderWidth: 1,
-    borderColor: 'rgba(0, 210, 190, 0.35)',
+    borderColor: 'rgba(255, 45, 85, 0.35)',
   },
   ivsGuestTrayFocus: {
     // Host-focus: keep the strip visually lighter above comments.
@@ -5412,7 +5543,7 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: 2,
-    backgroundColor: 'rgba(0,210,190,0.85)',
+    backgroundColor: 'rgba(255,45,85,)0.85)',
     zIndex: 5,
   },
   ivsBattleEdgeRight: {
@@ -5473,7 +5604,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(10,10,12,0.92)',
     marginBottom: 10,
     borderWidth: 1.5,
-    borderColor: 'rgba(0, 210, 190, 0.45)',
+    borderColor: 'rgba(255, 45, 85, 0.45)',
   },
   ivsGuestTileCollapsed: {
     // Fluid 3-wide row; width overridden when fewer guests for bigger tiles.
@@ -5485,7 +5616,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(10,10,12,0.92)',
     marginBottom: 0,
     borderWidth: 1.5,
-    borderColor: 'rgba(0, 210, 190, 0.45)',
+    borderColor: 'rgba(255, 45, 85, 0.45)',
   },
   ivsGuestTileHidden: {
     opacity: 0,
@@ -5546,7 +5677,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 4,
     borderRadius: 999,
-    backgroundColor: 'rgba(0, 210, 190, 0.7)',
+    backgroundColor: 'rgba(255, 45, 85, 0.7)',
     marginBottom: 6,
   },
   ivsHiddenTrayText: {
@@ -5682,9 +5813,9 @@ const styles = StyleSheet.create({
     borderRadius: 42,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0, 210, 190, 0.12)',
+    backgroundColor: 'rgba(255, 45, 85, 0.12)',
     borderWidth: 1,
-    borderColor: 'rgba(0, 210, 190, 0.40)',
+    borderColor: 'rgba(255, 45, 85, 0.40)',
     marginBottom: 18,
   },
   preLiveTitle: {
@@ -5710,12 +5841,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderRadius: 16,
-    backgroundColor: 'rgba(0,210,190,0.10)',
+    backgroundColor: 'rgba(255,45,85,)0.10)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.35)',
+    borderColor: 'rgba(255,45,85,)0.35)',
   },
   preLiveDeskBtnText: {
-    color: '#00D2BE',
+    color: COLORS.primary,
     fontSize: 15,
     fontWeight: '800',
     letterSpacing: -0.2,
@@ -5787,8 +5918,8 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.35)',
   },
   hostControlCircleActive: {
-    backgroundColor: 'rgba(0,210,190,0.18)',
-    borderColor: 'rgba(0,210,190,0.55)',
+    backgroundColor: 'rgba(255,45,85,)0.18)',
+    borderColor: 'rgba(255,45,85,)0.55)',
   },
   hostControlCircleDanger: {
     backgroundColor: 'rgba(244,63,94,0.92)',
@@ -5821,7 +5952,7 @@ const styles = StyleSheet.create({
     minWidth: 64,
   },
   layoutOptionActive: {
-    backgroundColor: 'rgba(0,210,190,0.12)',
+    backgroundColor: 'rgba(255,45,85,)0.12)',
   },
   layoutOptionLabel: {
     color: '#fff',
@@ -5830,7 +5961,7 @@ const styles = StyleSheet.create({
     marginTop: 5,
   },
   layoutOptionLabelActive: {
-    color: '#00D2BE',
+    color: COLORS.primary,
   },
   titleEditorModalRoot: {
     flex: 1,
@@ -5898,7 +6029,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.12)',
   },
   goLiveButtonText: {
-    color: '#0A0A0C',
+    color: '#FFFFFF',
     fontSize: 17,
     fontWeight: '800',
     textAlign: 'center',
@@ -6211,7 +6342,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'rgba(10, 10, 12, 0.72)',
     borderWidth: 1,
-    borderColor: 'rgba(0, 210, 190, 0.38)',
+    borderColor: 'rgba(255, 45, 85, 0.38)',
     borderRadius: 999,
     paddingLeft: 4,
     paddingRight: 10,
@@ -6290,13 +6421,13 @@ const styles = StyleSheet.create({
   liveHeaderFollow: {
     marginLeft: 12,
     borderWidth: 1,
-    borderColor: '#00D2BE',
+    borderColor: COLORS.primary,
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 5,
   },
   liveHeaderFollowText: {
-    color: '#00D2BE',
+    color: COLORS.primary,
     fontWeight: '800',
     fontSize: 12,
   },

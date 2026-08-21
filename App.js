@@ -77,7 +77,7 @@ enableScreens();
 
 // Note: LogBox.ignoreLogs must run post-mount to avoid touching RN internals too early
 
-const BLYP_CHROME_BLACK = '#0A0A0C';
+const BLYP_CHROME_BLACK = '#000000';
 
 function useAndroidChromeBlack() {
   useEffect(() => {

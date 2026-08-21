@@ -342,7 +342,7 @@ const styles = StyleSheet.create({
     paddingVertical: responsiveSize(4),
     paddingHorizontal: responsiveSize(9),
   },
-  openBadge: { backgroundColor: 'rgba(0,210,190,0.10)' },
+  openBadge: { backgroundColor: 'rgba(255, 45, 85,0.10)' },
   liveBadge: { backgroundColor: 'rgba(34,197,94,0.12)' },
   fullBadge: { backgroundColor: 'rgba(239,68,68,0.12)' },
   ambassadorBadge: { backgroundColor: 'rgba(245,158,11,0.12)' },

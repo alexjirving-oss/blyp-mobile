@@ -31,8 +31,8 @@ import { pickPublicLabel } from '../../../utils/publicLabel';
 
 /** Blyp COLORS — PETRONAS teal, ink chrome, gold prize accents. */
 const TEAL_DEEP = '#0A6B62';
-const TEAL = '#00D2BE';
-const TEAL_DIM = '#00A89E';
+const TEAL = '#FF2D55';
+const TEAL_DIM = '#E01E45';
 const TEAL_LIGHT = '#7FEDE2';
 const GOLD = '#F5C542';
 const GOLD_SOFT = '#FDE68A';
@@ -195,7 +195,7 @@ function SegFace({ uri, name, size = 22 }) {
         width: size,
         height: size,
         borderRadius: r,
-        backgroundColor: 'rgba(0,210,190,0.4)',
+        backgroundColor: 'rgba(255,45,85,0.4)',
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 1.5,
@@ -495,7 +495,7 @@ export default function PrizeWheel({
                   key={s.n}
                   d={s.path}
                   fill={s.color}
-                  stroke={s.occupied ? TEAL : s.accent ? 'rgba(245,197,66,0.65)' : 'rgba(0,210,190,0.28)'}
+                  stroke={s.occupied ? TEAL : s.accent ? 'rgba(245,197,66,0.65)' : 'rgba(255,45,85,0.28)'}
                   strokeWidth={s.occupied ? 1.8 : 1.1}
                 />
               ))}
@@ -621,7 +621,7 @@ const styles = StyleSheet.create({
   },
   glow: {
     position: 'absolute',
-    backgroundColor: 'rgba(0,210,190,0.28)',
+    backgroundColor: 'rgba(255,45,85,0.28)',
     borderWidth: 1.5,
     borderColor: 'rgba(245,197,66,0.45)',
   },
@@ -637,7 +637,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: 'rgba(10,10,12,0.7)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.4)',
+    borderColor: 'rgba(255,45,85,0.4)',
     alignItems: 'center',
     justifyContent: 'center',
   },

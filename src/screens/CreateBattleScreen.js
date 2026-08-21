@@ -348,7 +348,7 @@ const styles = StyleSheet.create({
   selectedOpponent: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: COLORS.backgroundCard, borderRadius: responsiveSize(12), padding: responsiveSize(12),
-    borderWidth: 1, borderColor: 'rgba(0,210,190,0.35)',
+    borderWidth: 1, borderColor: 'rgba(255, 45, 85,0.35)',
   },
   selName: { color: COLORS.textPrimary, fontWeight: '700', fontSize: responsiveFont(14) },
   selUsername: { color: COLORS.textSecondary, fontSize: responsiveFont(12) },
@@ -366,7 +366,7 @@ const styles = StyleSheet.create({
     paddingVertical: responsiveSize(8), paddingHorizontal: responsiveSize(14),
     borderWidth: 1, borderColor: 'transparent',
   },
-  chipActive: { borderColor: COLORS.primary, backgroundColor: 'rgba(0,210,190,0.12)' },
+  chipActive: { borderColor: COLORS.primary, backgroundColor: 'rgba(255, 45, 85,0.12)' },
   chipText: { color: COLORS.textSecondary, fontSize: responsiveFont(13), fontWeight: '600' },
   chipTextActive: { color: COLORS.primary },
   whenCard: {
@@ -385,7 +385,7 @@ const styles = StyleSheet.create({
     paddingVertical: responsiveSize(15), alignItems: 'center', marginTop: responsiveSize(28),
   },
   submitBtnDisabled: { opacity: 0.5 },
-  submitText: { color: '#0A0A0C', fontWeight: '800', fontSize: responsiveFont(15) },
+  submitText: { color: '#FFFFFF', fontWeight: '800', fontSize: responsiveFont(15) },
   footerHint: { color: COLORS.textSecondary, fontSize: responsiveFont(11), textAlign: 'center', marginTop: responsiveSize(10), opacity: 0.8 },
 });
 

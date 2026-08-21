@@ -14,7 +14,7 @@ import {
   phoneWidgetScale,
 } from '../../lib/studioOverlayFeedNative';
 
-const TEAL = '#00D2BE';
+const TEAL = '#FF2D55';
 
 function OverlayItem({ pos, layer, children, style }) {
   const [box, setBox] = useState(null);
@@ -216,7 +216,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: 'rgba(8, 10, 14, 0.78)',
     borderWidth: 1,
-    borderColor: 'rgba(0, 210, 190, 0.38)',
+    borderColor: 'rgba(255, 45, 85, 0.38)',
   },
   title: {
     color: TEAL,

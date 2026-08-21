@@ -43,7 +43,7 @@ import FrenemiesSettingsSheet from './frenemies/FrenemiesSettingsSheet';
 import FrenemiesWheelGlyph from './frenemies/FrenemiesWheelGlyph';
 import BuyCoinsOverlay from '../BuyCoinsOverlay';
 
-const TEAL = '#00D2BE';
+const TEAL = '#FF2D55';
 const ROSE = '#FB7185';
 const GOLD = '#F5C542';
 const GOLD_SOFT = '#FDE68A';
@@ -91,7 +91,7 @@ function Avatar({ uri, name, size = 36, ringColor = TEAL }) {
         width: size,
         height: size,
         borderRadius: r,
-        backgroundColor: 'rgba(0,210,190,0.22)',
+        backgroundColor: 'rgba(255,45,85,0.22)',
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 2,
@@ -1095,7 +1095,7 @@ export default function FrenemiesOverlay({
           style={[styles.landSlam, { opacity: landAnim, transform: [{ scale: landScale }] }]}
           pointerEvents="none"
         >
-          <LinearGradient colors={['rgba(245,197,66,0.95)', 'rgba(0,210,190,0.9)']} style={styles.landSlamInner}>
+          <LinearGradient colors={['rgba(245,197,66,0.95)', 'rgba(255,45,85,0.9)']} style={styles.landSlamInner}>
             <Text style={styles.landSlamKicker} allowFontScaling={false}>
               LAND
             </Text>
@@ -1401,7 +1401,7 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     overflow: 'hidden',
     borderWidth: 2,
-    borderColor: 'rgba(0,210,190,0.55)',
+    borderColor: 'rgba(255,45,85,0.55)',
   },
   startGrad: { padding: 16 },
   openBrandRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
@@ -1409,7 +1409,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 24,
-    backgroundColor: 'rgba(0,210,190,0.12)',
+    backgroundColor: 'rgba(255,45,85,0.12)',
     borderWidth: 2,
     borderColor: TEAL,
     alignItems: 'center',
@@ -1459,7 +1459,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: 'center',
   },
-  startBtnText: { color: INK, fontWeight: '900', fontSize: 16, letterSpacing: 0.2 },
+  startBtnText: { color: '#FFFFFF', fontWeight: '900', fontSize: 16, letterSpacing: 0.2 },
   backChip: { alignSelf: 'center', marginTop: 10, padding: 4 },
   backChipText: { color: 'rgba(255,255,255,0.55)', fontWeight: '700', fontSize: 12 },
   hud: {
@@ -1470,19 +1470,19 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     overflow: 'hidden',
     borderWidth: 1.5,
-    borderColor: 'rgba(0,210,190,0.4)',
+    borderColor: 'rgba(255,45,85,0.4)',
   },
   hudInner: { padding: 12 },
   hudRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   hudPhase: { color: '#fff', fontWeight: '800', fontSize: 15, marginTop: 2 },
   topActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   rulesChip: {
-    backgroundColor: 'rgba(0,210,190,0.16)',
+    backgroundColor: 'rgba(255,45,85,0.16)',
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.45)',
+    borderColor: 'rgba(255,45,85,0.45)',
   },
   rulesChipText: { color: TEAL, fontWeight: '900', fontSize: 11, letterSpacing: 0.3 },
   rulesTip: {
@@ -1545,8 +1545,8 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(245,197,66,0.4)',
   },
   payerHouse: {
-    backgroundColor: 'rgba(0,210,190,0.14)',
-    borderColor: 'rgba(0,210,190,0.45)',
+    backgroundColor: 'rgba(255,45,85,0.14)',
+    borderColor: 'rgba(255,45,85,0.45)',
   },
   payerText: { color: GOLD_SOFT, fontWeight: '900', fontSize: 10, letterSpacing: 0.4 },
   readyBlock: { alignItems: 'center', marginTop: 6 },
@@ -1555,7 +1555,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 22,
     borderWidth: 2,
-    borderColor: 'rgba(0,210,190,0.45)',
+    borderColor: 'rgba(255,45,85,0.45)',
     backgroundColor: 'rgba(11,47,44,0.55)',
     marginBottom: 4,
   },
@@ -1568,8 +1568,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   autoOnChip: {
-    backgroundColor: 'rgba(0,210,190,0.18)',
-    borderColor: 'rgba(0,210,190,0.55)',
+    backgroundColor: 'rgba(255,45,85,0.18)',
+    borderColor: 'rgba(255,45,85,0.55)',
   },
   autoOffChip: {
     backgroundColor: 'rgba(255,255,255,0.06)',
@@ -1657,12 +1657,12 @@ const styles = StyleSheet.create({
   },
   resultBanner: {
     marginTop: 8,
-    backgroundColor: 'rgba(0,210,190,0.14)',
+    backgroundColor: 'rgba(255,45,85,0.14)',
     borderRadius: 12,
     paddingVertical: 8,
     paddingHorizontal: 10,
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.35)',
+    borderColor: 'rgba(255,45,85,0.35)',
   },
   resultText: { color: TEAL, fontWeight: '800', textAlign: 'center', fontSize: 13, lineHeight: 18 },
   ledgerChip: {
@@ -1681,7 +1681,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.4)',
+    borderColor: 'rgba(255,45,85,0.4)',
   },
   overlayGrad: { padding: 16 },
   overlayTop: {
@@ -1725,13 +1725,13 @@ const styles = StyleSheet.create({
   choiceBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,210,190,0.1)',
+    backgroundColor: 'rgba(255,45,85,0.1)',
     borderRadius: 14,
     paddingVertical: 12,
     paddingHorizontal: 12,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.35)',
+    borderColor: 'rgba(255,45,85,0.35)',
     gap: 10,
   },
   choiceDisabled: { opacity: 0.4 },
@@ -1786,8 +1786,8 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 0 },
   },
   throwProtected: {
-    borderColor: 'rgba(0,210,190,0.55)',
-    backgroundColor: 'rgba(0,210,190,0.12)',
+    borderColor: 'rgba(255,45,85,0.55)',
+    backgroundColor: 'rgba(255,45,85,0.12)',
   },
   throwEmpty: {
     opacity: 0.4,
@@ -1803,7 +1803,7 @@ const styles = StyleSheet.create({
     minWidth: 220,
     alignItems: 'center',
   },
-  queueJoinText: { color: INK, fontWeight: '900', fontSize: 14 },
+  queueJoinText: { color: '#FFFFFF', fontWeight: '900', fontSize: 14 },
   queueLeaveBtn: {
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.25)',

@@ -5,7 +5,7 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 
-const TEAL = '#00D2BE';
+const TEAL = '#FF2D55';
 const GOLD = '#F5C542';
 const ROSE = '#FB7185';
 const TRACK = 'rgba(255,255,255,0.12)';

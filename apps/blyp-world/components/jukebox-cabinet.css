@@ -1127,10 +1127,12 @@
   }
 }
 
-/* Warm night desk — flatten skeuomorph inside Live Studio booth only. */
+/* Live Studio desk — same charcoal/coral language as the rest of the booth.
+   Overlay on the program (.jbx-ov) stays a compact now-playing chip. */
 .tls-booth .jbx-rail.tls-rail-jukebox {
   padding: 0;
   background: transparent;
+  min-height: 0;
 }
 
 .tls-booth .jbx-cabinet,
@@ -1140,37 +1142,112 @@
   box-shadow: none !important;
 }
 
-.tls-booth .jbx,
-.tls-booth .jbx-house,
-.tls-booth .jbx-expand {
+.tls-booth .jbx-cabinet {
+  gap: 0.55rem;
+}
+
+.tls-booth .jbx {
+  gap: 0.7rem;
+  padding: 0.75rem 0.8rem 0.85rem;
   background: #1e2128 !important;
-  border: 1px solid rgba(236, 234, 240, 0.12) !important;
+  background-image: none !important;
+  border: 1px solid var(--blyp-line, rgba(245, 245, 242, 0.12)) !important;
   border-radius: 12px !important;
   box-shadow: none !important;
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  color: #f5f5f2;
+}
+
+.tls-booth .jbx-expand,
+.tls-booth .jbx-house,
+.tls-booth .jbx-player,
+.tls-booth .jbx-keys {
+  background: transparent !important;
   background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  padding: 0;
+}
+
+.tls-booth .jbx-bubbler,
+.tls-booth .jbx-lamp,
+.tls-booth .jbx-arm,
+.tls-booth .jbx-spindle,
+.tls-booth .jbx-shine {
+  display: none !important;
+}
+
+.tls-booth .jbx-head {
+  align-items: center;
 }
 
 .tls-booth .jbx-marquee,
-.tls-booth .jbx-marquee span,
-.tls-booth .jbx-plaque,
-.tls-booth .jbx-ticket,
-.tls-booth .jbx-now,
-.tls-booth .jbx-label {
-  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif !important;
-  color: #eceaf0 !important;
+.tls-booth .jbx-marquee span {
+  display: block;
+  font-family: var(--font-display), var(--font-body), ui-sans-serif, system-ui, sans-serif !important;
+  font-size: 0.95rem !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.02em !important;
+  line-height: 1.2 !important;
+  color: #f5f5f2 !important;
+  -webkit-text-fill-color: #f5f5f2 !important;
+  background: none !important;
+  background-image: none !important;
+  -webkit-background-clip: border-box !important;
+  background-clip: border-box !important;
   text-shadow: none !important;
-  letter-spacing: 0.02em;
+  filter: none !important;
+  animation: none !important;
+  text-transform: none;
+}
+
+.tls-booth .jbx-plaque,
+.tls-booth .jbx-queue-label,
+.tls-booth .jbx-empty,
+.tls-booth .jbx-time,
+.tls-booth .jbx-next,
+.tls-booth .jbx-vol {
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif !important;
+  font-size: 0.75rem !important;
+  letter-spacing: 0.01em !important;
+  text-transform: none !important;
+  color: #a1a4ae !important;
+  -webkit-text-fill-color: #a1a4ae !important;
+  text-shadow: none !important;
+  filter: none !important;
+}
+
+.tls-booth .jbx-plaque {
+  text-align: left;
+  margin: -0.25rem 0 0;
 }
 
 .tls-booth .jbx-compact,
 .tls-booth .jbx-gear-btn,
 .tls-booth .jbx-key,
-.tls-booth .jbx-play {
+.tls-booth .jbx-play,
+.tls-booth .jbx-paddle,
+.tls-booth .jbx-house > summary {
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif !important;
+  font-size: 0.75rem !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.01em !important;
+  text-transform: none !important;
   background: rgba(255, 255, 255, 0.06) !important;
   background-image: none !important;
-  color: #eceaf0 !important;
-  border: 1px solid rgba(236, 234, 240, 0.16) !important;
+  color: #f5f5f2 !important;
+  -webkit-text-fill-color: #f5f5f2 !important;
+  border: 1px solid rgba(245, 245, 242, 0.16) !important;
   box-shadow: none !important;
+  border-radius: 8px !important;
+  filter: none !important;
+}
+
+.tls-booth .jbx-gear-btn {
+  width: 1.85rem;
+  height: 1.85rem;
+  padding: 0.32rem;
   border-radius: 8px !important;
 }
 
@@ -1179,40 +1256,314 @@
   background: rgba(255, 77, 109, 0.14) !important;
   border-color: rgba(255, 77, 109, 0.45) !important;
   color: #fff !important;
-  box-shadow: none !important;
+  -webkit-text-fill-color: #fff !important;
 }
 
-.tls-booth .jbx-disc,
-.tls-booth .jbx-bubbler,
-.tls-booth .jbx-strip,
-.tls-booth .jbx-lamp {
-  display: none !important;
+.tls-booth .jbx-player {
+  display: grid;
+  grid-template-columns: 3.5rem minmax(0, 1fr);
+  gap: 0.7rem;
+  align-items: center;
 }
 
-/* Kill western fire / orange neon title glow — calm warm type only */
+.tls-booth .jbx-vinyl-wrap {
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: none;
+  background: #12141a;
+}
+
+.tls-booth .jbx-disc {
+  display: block !important;
+  animation: none !important;
+  inset: 0;
+  border-radius: 8px;
+  background: #12141a !important;
+}
+
+.tls-booth .jbx-label,
+.tls-booth .jbx-label-empty {
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+  box-shadow: none;
+  object-fit: cover;
+}
+
 .tls-booth .jbx-title,
 .tls-booth .jbx-meta .jbx-title,
-.tls-booth .jbx-marquee,
-.tls-booth .jbx-marquee span,
-.tls-booth .jbx-plaque,
-.tls-booth .jbx-ticket,
-.tls-booth .jbx-now,
-.tls-booth .jbx-label,
 .tls-booth .jbx-artist {
   font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif !important;
   color: #f5f5f2 !important;
+  -webkit-text-fill-color: #f5f5f2 !important;
   text-shadow: none !important;
   filter: none !important;
   background: none !important;
   background-image: none !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+}
+
+.tls-booth .jbx-meta .jbx-title {
+  font-size: 0.9rem !important;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.tls-booth .jbx-meta .jbx-artist {
+  font-size: 0.78rem !important;
+  color: #a1a4ae !important;
+  -webkit-text-fill-color: #a1a4ae !important;
+}
+
+.tls-booth .jbx-tube {
+  height: 0.28rem;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 99px;
+  box-shadow: none;
+}
+
+.tls-booth .jbx-tube > i {
+  background: #ff4d6d;
+  box-shadow: none;
+}
+
+.tls-booth .jbx-bead {
+  display: none;
+}
+
+.tls-booth .jbx-arcade {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06) !important;
+  background-image: none !important;
+  color: #f5f5f2 !important;
+  border: 1px solid rgba(245, 245, 242, 0.16);
+  box-shadow: none !important;
+  filter: none !important;
+}
+
+.tls-booth .jbx-vol input[type="range"] {
+  height: 0.28rem;
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: none;
+}
+
+.tls-booth .jbx-vol input[type="range"]::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  background: #f5f5f2;
+  box-shadow: none;
+}
+
+.tls-booth .jbx-slot-row {
+  gap: 0.4rem;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.tls-booth .jbx-slot-row input,
+.tls-booth .jbx-slot-row input[type="search"] {
+  -webkit-appearance: none;
+  appearance: none;
+  min-height: 2.5rem;
+  padding: 0.55rem 0.8rem;
+  border: 1px solid var(--blyp-line, rgba(245, 245, 242, 0.12));
+  border-radius: 8px;
+  background: #12141a !important;
+  color: #f5f5f2 !important;
+  -webkit-text-fill-color: #f5f5f2 !important;
+  caret-color: #f5f5f2;
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif !important;
+  font-size: 0.9375rem !important;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0;
+  text-shadow: none !important;
+  filter: none !important;
+  outline: none;
+}
+
+.tls-booth .jbx-slot-row input:focus {
+  border-color: rgba(255, 77, 109, 0.45);
+}
+
+.tls-booth .jbx-slot-row input::placeholder {
+  color: #a1a4ae !important;
+  -webkit-text-fill-color: #a1a4ae !important;
+  opacity: 1;
+  font-family: inherit;
+}
+
+.tls-booth .jbx-slot-row input::-webkit-search-decoration,
+.tls-booth .jbx-slot-row input::-webkit-search-cancel-button,
+.tls-booth .jbx-slot-row input::-webkit-search-results-button,
+.tls-booth .jbx-slot-row input::-webkit-search-results-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.tls-booth .jbx-slot-go {
+  min-height: 2.5rem;
+  padding: 0 0.95rem;
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: #ff4d6d !important;
+  background-image: none !important;
+  color: #fff !important;
+  -webkit-text-fill-color: #fff !important;
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif !important;
+  font-size: 0.8125rem !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.01em !important;
+  text-transform: none !important;
+  box-shadow: none !important;
+}
+
+.tls-booth .jbx-slot-go:hover:not(:disabled) {
+  background: #e83d5c !important;
+}
+
+.tls-booth .jbx-strips {
+  display: flex !important;
+  max-height: 12rem;
+  padding: 0.15rem 0;
+  background: transparent !important;
+  box-shadow: none !important;
+  border: 0;
+  border-radius: 0;
+  gap: 0.2rem;
+}
+
+.tls-booth .jbx-strip {
+  display: flex !important;
+  min-height: 2.6rem;
+  padding: 0.35rem 0.4rem;
+  background: rgba(255, 255, 255, 0.04) !important;
+  background-image: none !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+  animation: none !important;
+}
+
+.tls-booth .jbx-strip.is-on {
+  background: rgba(255, 77, 109, 0.14) !important;
+  box-shadow: none !important;
+}
+
+.tls-booth .jbx-strip-art {
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.tls-booth .jbx-strip-title,
+.tls-booth .jbx-strip-artist,
+.tls-booth .jbx-strip-body,
+.tls-booth .jbx-strip-body strong,
+.tls-booth .jbx-strip-body span,
+.tls-booth .jbx-strip-body b,
+.tls-booth .jbx-strip-body em {
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif !important;
+  text-shadow: none !important;
+  filter: none !important;
+}
+
+.tls-booth .jbx-strip-title,
+.tls-booth .jbx-strip-body strong,
+.tls-booth .jbx-strip-body b {
+  font-size: 0.84rem !important;
+  font-weight: 600;
+  color: #f5f5f2 !important;
   -webkit-text-fill-color: #f5f5f2 !important;
 }
 
-.tls-booth .jbx-progress,
-.tls-booth .jbx-progress > i,
-.tls-booth .jbx-meter,
-.tls-booth .jbx-key.is-on,
-.tls-booth .jbx-arcade {
-  box-shadow: none !important;
+.tls-booth .jbx-strip-artist,
+.tls-booth .jbx-strip-body span,
+.tls-booth .jbx-strip-body em {
+  font-size: 0.72rem !important;
+  color: #a1a4ae !important;
+  -webkit-text-fill-color: #a1a4ae !important;
+}
+
+.tls-booth .jbx-paddle {
+  min-width: 2.4rem;
+  padding: 0.28rem 0.5rem;
+}
+
+.tls-booth .jbx-keys {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.tls-booth .jbx-keys .jbx-key {
+  flex: 1;
+}
+
+.tls-booth .jbx-keys .jbx-key:only-child {
+  background: #ff4d6d !important;
+  border-color: #ff4d6d !important;
+  color: #fff !important;
+  -webkit-text-fill-color: #fff !important;
+}
+
+.tls-booth .jbx-gear-menu {
+  background: #1e2128;
+  border: 1px solid var(--blyp-line, rgba(245, 245, 242, 0.12));
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+}
+
+.tls-booth .jbx-gear-menu p {
+  color: #a1a4ae;
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+}
+
+.tls-booth .jbx-fail {
+  background: rgba(255, 77, 109, 0.12);
+  border: 1px solid rgba(255, 77, 109, 0.35);
+  color: #f5f5f2;
+}
+
+.tls-booth .jbx-house > summary {
+  text-align: left;
+  padding: 0.45rem 0.65rem;
+}
+
+.tls-booth .tls-ov.tls-ov-jukebox.jbx-ov,
+.tls-booth .tls-ov.tls-ov-jukebox.jbx-ov:hover,
+.tls-booth .tls-ov.tls-ov-jukebox.jbx-ov.tls-ov-dragging {
+  background: #1e2128 !important;
+  background-image: none !important;
+  border: 1px solid rgba(245, 245, 242, 0.16) !important;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4) !important;
+  color: #f5f5f2;
+}
+
+.tls-booth .jbx-ov-now,
+.tls-booth .jbx-ov-by,
+.tls-booth .jbx-ov-kicker,
+.tls-booth .jbx-ov-next,
+.tls-booth .jbx-ov-mark {
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif !important;
+  text-shadow: none !important;
   filter: none !important;
+  -webkit-text-fill-color: unset !important;
+  background: none !important;
+}
+
+.tls-booth .jbx-ov-now {
+  color: #f5f5f2;
+}
+
+.tls-booth .jbx-ov-by,
+.tls-booth .jbx-ov-kicker,
+.tls-booth .jbx-ov-next {
+  color: #a1a4ae;
 }

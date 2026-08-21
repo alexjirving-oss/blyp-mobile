@@ -54,7 +54,7 @@ function timeAgo(ts) {
 }
 
 const ICON = {
-  follow: { name: 'person-add', color: '#00D2BE' },
+  follow: { name: 'person-add', color: '#FF2D55' },
   comment: { name: 'chatbubble', color: '#4DA3FF' },
   like: { name: 'heart', color: '#FF3B30' },
 };

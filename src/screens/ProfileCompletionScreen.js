@@ -89,11 +89,11 @@ export default function ProfileCompletionScreen({
             style={styles.buttonWrap}
           >
             <LinearGradient
-              colors={[COLORS.primary, '#00A89E']}
+              colors={[COLORS.primary, COLORS.primaryDark]}
               style={[styles.button, (saving || !validation.ok) && styles.disabled]}
             >
               {saving
-                ? <ActivityIndicator color="#0A0A0C" />
+                ? <ActivityIndicator color={COLORS.white} />
                 : <Text style={styles.buttonText}>Continue</Text>}
             </LinearGradient>
           </TouchableOpacity>
@@ -176,7 +176,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   buttonText: {
-    color: '#0A0A0C',
+    color: COLORS.white,
     fontSize: 16,
     fontWeight: '800',
   },

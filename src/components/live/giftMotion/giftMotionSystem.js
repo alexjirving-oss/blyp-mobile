@@ -9,9 +9,9 @@ import { Platform } from 'react-native';
 import * as Device from 'expo-device';
 import { COLORS } from '../../../styles/theme';
 
-export const TEAL = COLORS.primary || '#00D2BE';
-export const TEAL_DARK = COLORS.primaryDark || '#00A89E';
-export const TEAL_LIGHT = COLORS.primaryLight || '#7FEDE2';
+export const TEAL = COLORS.primary;
+export const TEAL_DARK = COLORS.primaryDark;
+export const TEAL_LIGHT = COLORS.primaryLight;
 export const ENERGY_ORANGE = '#F59E0B';
 export const ENERGY_RED = '#EF4444';
 export const GOLD = '#FBBF24';

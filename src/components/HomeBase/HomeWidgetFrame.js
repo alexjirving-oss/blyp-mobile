@@ -92,9 +92,9 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     borderRadius: 18,
     borderWidth: 1.5,
-    borderColor: 'rgba(0,210,190,0.35)',
+    borderColor: 'rgba(255, 45, 85,0.35)',
     borderStyle: 'dashed',
-    backgroundColor: 'rgba(0,210,190,0.04)',
+    backgroundColor: 'rgba(255, 45, 85,0.04)',
     overflow: 'hidden',
   },
   editWrapOff: {

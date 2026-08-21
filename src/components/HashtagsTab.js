@@ -152,7 +152,7 @@ const HashtagsTab = ({ posts = [], userInteractions = [], onHashtagSelect, navig
             {selectedHashtags.map((hashtag, index) => (
               <LinearGradient
                 key={index}
-                colors={['#00D2BE', '#00A89E']}
+                colors={['#FF2D55', '#E01E45']}
                 style={styles.selectedHashtagChip}
               >
                 <Text style={styles.selectedHashtagText}>{hashtag}</Text>
@@ -272,7 +272,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   clearAllButton: {
-    color: '#00D2BE',
+    color: '#FF2D55',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -339,8 +339,8 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   selectedHashtagChip: {
-    backgroundColor: '#00D2BE',
-    borderColor: '#00D2BE',
+    backgroundColor: '#FF2D55',
+    borderColor: '#FF2D55',
   },
   hashtagText: {
     color: '#A1A1AA',
@@ -348,7 +348,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   selectedHashtagText: {
-    color: '#0A0A0C',
+    color: '#FFFFFF',
     fontWeight: '700',
   },
   checkIcon: {

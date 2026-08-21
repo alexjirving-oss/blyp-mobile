@@ -27,7 +27,7 @@ export default function ProfileIdentityFlair({ clubIds, badgeIds, style }) {
         <View style={styles.row}>
           {clubs.map((c) => (
             <View key={c.id} style={[styles.chip, styles.clubChip]}>
-              <Icon name={c.icon} size={11} color={COLORS.accent || '#00D2BE'} />
+              <Icon name={c.icon} size={11} color={COLORS.accent || '#FF2D55'} />
               <Text style={styles.clubText} numberOfLines={1}>
                 {c.shortLabel || c.label}
               </Text>
@@ -74,8 +74,8 @@ const styles = StyleSheet.create({
     maxWidth: '100%',
   },
   clubChip: {
-    backgroundColor: 'rgba(0, 210, 190, 0.10)',
-    borderColor: 'rgba(0, 210, 190, 0.32)',
+    backgroundColor: 'rgba(255, 45, 85, 0.10)',
+    borderColor: 'rgba(255, 45, 85, 0.32)',
   },
   badgeChip: {
     backgroundColor: 'rgba(167, 139, 250, 0.10)',

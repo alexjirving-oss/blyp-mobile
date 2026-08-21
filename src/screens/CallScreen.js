@@ -25,7 +25,7 @@ import { playBlypNotify, stopBlypNotify } from '../services/notifySound';
 import { cancelIncomingCallNative } from '../services/incomingCallNative';
 
 const T = blypTheme.colors;
-const TEAL = T.primary || '#00D2BE';
+const TEAL = T.primary || '#FF2D55';
 const CHROME = '#0A0A0C';
 
 const RING_TIMEOUT_MS = 45_000;
@@ -606,7 +606,7 @@ const styles = StyleSheet.create({
     width: 280,
     height: 280,
     borderRadius: 140,
-    backgroundColor: 'rgba(0, 210, 190, 0.10)',
+    backgroundColor: 'rgba(255, 45, 85, 0.10)',
   },
   content: {
     flex: 1,
@@ -657,7 +657,7 @@ const styles = StyleSheet.create({
     height: 120,
     borderRadius: 60,
     borderWidth: 2,
-    borderColor: 'rgba(0, 210, 190, 0.35)',
+    borderColor: 'rgba(255, 45, 85, 0.35)',
   },
   avatarPlaceholder: {
     backgroundColor: '#141418',

@@ -18,7 +18,7 @@ export default function ModerationQueueScreen() {
   if (roleLoading) {
     return (
       <ScreenContainer>
-        <View style={styles.container}><ActivityIndicator color="#00D2BE" /></View>
+        <View style={styles.container}><ActivityIndicator color="#FF2D55" /></View>
       </ScreenContainer>
     );
   }
@@ -48,7 +48,7 @@ export default function ModerationQueueScreen() {
           )}
           {item.status !== 'resolved' && (
             <TouchableOpacity style={[styles.actionBtn, styles.resolveBtn]} onPress={() => resolve(item.id, { actionType: 'action_taken' }, user?.uid)}>
-              <Text style={[styles.actionText, { color: '#0A0A0C' }]}>Resolve</Text>
+              <Text style={[styles.actionText, { color: '#FFFFFF' }]}>Resolve</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -63,7 +63,7 @@ export default function ModerationQueueScreen() {
         <TouchableOpacity onPress={refresh} style={styles.refresh}>
           <Text style={styles.refreshText}>Refresh</Text>
         </TouchableOpacity>
-        {loading && <ActivityIndicator color="#00D2BE" style={{ marginVertical: 12 }} />}
+        {loading && <ActivityIndicator color="#FF2D55" style={{ marginVertical: 12 }} />}
         <FlatList
           data={items}
           keyExtractor={(item) => item.id}
@@ -90,7 +90,7 @@ const styles = StyleSheet.create({
   reasons: { color: '#D4D4D8', fontSize: 12, marginTop: 6 },
   actions: { flexDirection: 'row', marginTop: 10 },
   actionBtn: { backgroundColor: '#71717A', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 6, marginRight: 8 },
-  resolveBtn: { backgroundColor: '#00D2BE' },
+  resolveBtn: { backgroundColor: '#FF2D55' },
   actionText: { color: '#f1f5f9', fontSize: 12, fontWeight: '600' },
   empty: { color: '#71717A', textAlign: 'center', marginTop: 30 }
 });

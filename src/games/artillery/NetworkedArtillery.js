@@ -6,9 +6,9 @@ import { WORLD, WEAPONS, WEAPON_ORDER, aimArc, surfaceAt, UNIT_RADIUS } from './
 import { subscribeToGameEvents } from '../../realtime/artilleryGameSocket';
 import { artilleryStart, artilleryJoin, artilleryFire, artilleryGetState } from '../../api/ivsLiveApi';
 
-const TEAL = '#00D2BE';
+const TEAL = '#FF2D55';
 const ROSE = '#FB7185';
-const TEAM_COLORS = ['#00D2BE', '#FB7185'];
+const TEAM_COLORS = ['#FF2D55', '#60A5FA'];
 const DEBRIS_COLORS = ['#FDBA74', '#FB923C', '#FCD34D', '#F87171', '#FFFFFF'];
 
 function makeDebris() {
@@ -488,7 +488,7 @@ const styles = StyleSheet.create({
   weaponBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 9, paddingHorizontal: 16, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
   weaponBtnActive: { backgroundColor: TEAL, borderColor: TEAL },
   weaponText: { color: '#fff', fontWeight: '700', fontSize: 13 },
-  weaponTextActive: { color: '#0A0A0C' },
+  weaponTextActive: { color: '#FFFFFF' },
   sliderWrap: { gap: 5 },
   sliderLabel: { color: '#A1A1AA', fontWeight: '600', fontSize: 12 },
   sliderTrack: { height: 24, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.08)', justifyContent: 'center' },
@@ -499,7 +499,7 @@ const styles = StyleSheet.create({
   smallBtnText: { color: '#fff', fontSize: 11, fontWeight: '600' },
   fireBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: TEAL, paddingVertical: 15, borderRadius: 30 },
   fireBtnDisabled: { opacity: 0.4 },
-  fireText: { color: '#0A0A0C', fontWeight: '800', fontSize: 16 },
+  fireText: { color: '#FFFFFF', fontWeight: '800', fontSize: 16 },
   spectatorBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, paddingHorizontal: 16 },
   spectatorText: { color: '#D4D4D8', fontWeight: '600', fontSize: 12 },
 });

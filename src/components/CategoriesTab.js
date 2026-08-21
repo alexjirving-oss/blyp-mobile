@@ -106,7 +106,7 @@ const CategoriesTab = ({ posts = [], onCategorySelect, navigation }) => {
       activeOpacity={0.8}
     >
       <LinearGradient
-        colors={[category.color || '#00D2BE', `${category.color || '#00D2BE'}90`]}
+        colors={[category.color || '#FF2D55', `${category.color || '#FF2D55'}90`]}
         style={styles.categoryGradient}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
@@ -245,7 +245,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   clearButtonText: {
-    color: '#00D2BE',
+    color: '#FF2D55',
     marginLeft: 8,
     fontSize: 14,
     fontWeight: '600',
@@ -344,7 +344,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   selectedInfoHighlight: {
-    color: '#00D2BE',
+    color: '#FF2D55',
     fontWeight: 'bold',
   },
   selectedInfoCount: {

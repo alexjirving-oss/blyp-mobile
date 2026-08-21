@@ -414,7 +414,7 @@ const YourBlypContent = ({ navigation }) => {
         ]}
       >
         <LinearGradient
-          colors={['rgba(0,210,190,0.18)', 'rgba(18,18,22,0.98)', COLORS.backgroundCard]}
+          colors={['rgba(255, 45, 85,0.18)', 'rgba(18,18,22,0.98)', COLORS.backgroundCard]}
           locations={[0, 0.58, 1]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
@@ -842,9 +842,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: responsiveSize(18),
-    backgroundColor: 'rgba(0,210,190,0.10)',
+    backgroundColor: 'rgba(255, 45, 85,0.10)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.24)',
+    borderColor: 'rgba(255, 45, 85,0.24)',
   },
   errorIcon: {
     width: responsiveSize(54),
@@ -853,9 +853,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: responsiveSize(18),
-    backgroundColor: 'rgba(0,210,190,0.10)',
+    backgroundColor: 'rgba(255, 45, 85,0.10)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.24)',
+    borderColor: 'rgba(255, 45, 85,0.24)',
   },
   stateEyebrow: {
     color: COLORS.primary,
@@ -923,7 +923,7 @@ const styles = StyleSheet.create({
     padding: responsiveSize(20),
     borderRadius: responsiveSize(24),
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.24)',
+    borderColor: 'rgba(255, 45, 85,0.24)',
     overflow: 'hidden',
     ...SHADOWS.medium,
   },
@@ -947,9 +947,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: responsiveSize(13),
-    backgroundColor: 'rgba(0,210,190,0.12)',
+    backgroundColor: 'rgba(255, 45, 85,0.12)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.26)',
+    borderColor: 'rgba(255, 45, 85,0.26)',
   },
   heroCopy: {
     flex: 1,
@@ -1021,9 +1021,9 @@ const styles = StyleSheet.create({
     borderRadius: responsiveSize(10),
   },
   periodTabActive: {
-    backgroundColor: 'rgba(0,210,190,0.16)',
+    backgroundColor: 'rgba(255, 45, 85,0.16)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.28)',
+    borderColor: 'rgba(255, 45, 85,0.28)',
   },
   periodTabText: {
     color: COLORS.textMuted,
@@ -1166,9 +1166,9 @@ const styles = StyleSheet.create({
     marginTop: responsiveSize(10),
     padding: responsiveSize(14),
     borderRadius: responsiveSize(16),
-    backgroundColor: 'rgba(0,210,190,0.055)',
+    backgroundColor: 'rgba(255, 45, 85,0.055)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.14)',
+    borderColor: 'rgba(255, 45, 85,0.14)',
   },
   sectionEmptyIcon: {
     width: responsiveSize(42),
@@ -1176,7 +1176,7 @@ const styles = StyleSheet.create({
     borderRadius: responsiveSize(14),
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,210,190,0.10)',
+    backgroundColor: 'rgba(255, 45, 85,0.10)',
   },
   sectionEmptyCopy: {
     flex: 1,
@@ -1511,9 +1511,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: responsiveSize(15),
-    backgroundColor: 'rgba(0,210,190,0.10)',
+    backgroundColor: 'rgba(255, 45, 85,0.10)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.22)',
+    borderColor: 'rgba(255, 45, 85,0.22)',
   },
   creatorEmptyCopy: {
     maxWidth: 470,
@@ -1538,9 +1538,9 @@ const styles = StyleSheet.create({
     paddingVertical: responsiveSize(8),
     paddingHorizontal: responsiveSize(11),
     borderRadius: responsiveSize(10),
-    backgroundColor: 'rgba(0,210,190,0.09)',
+    backgroundColor: 'rgba(255, 45, 85,0.09)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.18)',
+    borderColor: 'rgba(255, 45, 85,0.18)',
   },
   creatorEmptyActionText: {
     color: COLORS.primary,
@@ -1627,9 +1627,9 @@ const styles = StyleSheet.create({
     borderRadius: responsiveSize(11),
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,210,190,0.10)',
+    backgroundColor: 'rgba(255, 45, 85,0.10)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.18)',
+    borderColor: 'rgba(255, 45, 85,0.18)',
   },
   linkText: {
     marginTop: responsiveSize(14),

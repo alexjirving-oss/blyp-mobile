@@ -722,14 +722,14 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   permissionButton: {
-    backgroundColor: '#00D2BE',
+    backgroundColor: '#FF2D55',
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: 8,
     marginTop: 16,
   },
   permissionButtonText: {
-    color: '#0A0A0C',
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -923,13 +923,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   doneButton: {
-    backgroundColor: '#00D2BE',
+    backgroundColor: '#FF2D55',
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 25,
   },
   doneButtonText: {
-    color: '#0A0A0C',
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: 'bold',
   },

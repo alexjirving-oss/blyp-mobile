@@ -18,7 +18,7 @@ export const FREE_SLOT_LIMIT = 6;
 export const PRO_SLOT_LIMIT = 12;
 
 export const ALERT_THEMES = [
-  { id: 'pulse', label: 'Pulse', accent: '#00D2BE', blurb: 'Blyp teal alerts' },
+  { id: 'pulse', label: 'Pulse', accent: '#FF2D55', blurb: 'Blyp teal alerts' },
   { id: 'neon', label: 'Neon', accent: '#67E8F9', blurb: 'Electric cyan pop' },
   { id: 'ember', label: 'Ember', accent: '#FB7185', blurb: 'Rose heat for gifts' },
   { id: 'gold', label: 'Gold', accent: '#FBBF24', blurb: 'Warm highlight rail' },

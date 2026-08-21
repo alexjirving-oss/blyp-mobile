@@ -27,6 +27,9 @@ export const LIVE_LAYOUT_MODES = {
 
 export type LiveLayoutMode = (typeof LIVE_LAYOUT_MODES)[keyof typeof LIVE_LAYOUT_MODES];
 
+/** Phone watch default (portrait live). Matches Studio `host-top-9`. */
+export const DEFAULT_LIVE_LAYOUT_MODE: LiveLayoutMode = LIVE_LAYOUT_MODES.HOST_TOP_9;
+
 export type LiveLayoutOption = {
   id: LiveLayoutMode;
   label: string;
@@ -74,14 +77,13 @@ export function normalizeLiveLayoutMode(raw: unknown): LiveLayoutMode {
   ) {
     return value;
   }
-  return LIVE_LAYOUT_MODES.BOTTOM_GRID;
+  return DEFAULT_LIVE_LAYOUT_MODE;
 }
 
 /**
  * Studio program layouts (`apps/blyp-world/lib/studioStageLayouts.ts`).
- * Keep ids in sync with STAGE_LAYOUTS. Phone has four compositional modes;
- * this is the closest match so a Studio host's Split/Focus/Grid shows on the phone
- * instead of always defaulting to bottom tray.
+ * Keep ids in sync with STAGE_LAYOUTS. Phone default is HOST_TOP_9 (Studio host-top-9).
+ * Other Studio presets map onto the closest phone compositional mode.
  */
 const STUDIO_LAYOUT_TO_LIVE: Record<string, LiveLayoutMode> = {
   solo: LIVE_LAYOUT_MODES.SOLO,
@@ -166,6 +168,37 @@ export function guestBoxesForLayout(mode: LiveLayoutMode): number {
   if (mode === LIVE_LAYOUT_MODES.SOLO) return 0;
   if (mode === LIVE_LAYOUT_MODES.HOST_TOP_9) return 9;
   return MAX_GUEST_SLOTS;
+}
+
+export const HOST_TOP_9_PINK = '#FF2D55';
+
+export type HostTop9WatchLayout = {
+  hostH: number;
+  gridH: number;
+  chatH: number;
+};
+
+/**
+ * Fit Host+9 inside the content window BETWEEN header chrome and footer bar.
+ * Host stays a 16:9 band (~top third); chat/gift sit under the 3×3, not over it.
+ */
+export function measureHostTop9WatchLayout(
+  contentW: number,
+  contentH: number,
+  opts?: { expanded?: boolean }
+): HostTop9WatchLayout {
+  const w = Math.max(1, Math.floor(contentW || 0));
+  const h = Math.max(1, Math.floor(contentH || 0));
+  if (opts?.expanded) {
+    return { hostH: h, gridH: 0, chatH: 0 };
+  }
+  const chatH = Math.min(120, Math.max(72, Math.round(h * 0.17)));
+  const idealHost = Math.round(w * (9 / 16));
+  const maxHost = Math.round(h * 0.36);
+  const minHost = Math.min(maxHost, Math.round(h * 0.22));
+  const hostH = Math.min(maxHost, Math.max(minHost, idealHost));
+  const gridH = Math.max(84, h - hostH - chatH);
+  return { hostH, gridH, chatH };
 }
 
 /**

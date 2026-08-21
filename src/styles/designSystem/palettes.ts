@@ -9,12 +9,12 @@
  * existing screens keep working, and adds secondary accent / gradient / glow
  * tokens (page gradient stops, scrims, strong borders).
  *
- * Brand language (product is dark-only in ThemeProvider) — warm night, aligned
- * to blyp.world `:root` (`apps/blyp-world/app/globals.css`):
- *   - Brand signal: coral `#FF4D6D` (CTA / LIVE / active chrome — sparingly)
- *   - Secondary: warm taupe `#C4B5A5` (demoted off neon cyan)
- *   - Page chrome: warm charcoal `#12141A`
- *   - Raised surfaces: `#1A1C24` / cards `#16181F`
+ * Brand language (product is dark-only in ThemeProvider) — locked to the
+ * 2026 homepage mock:
+ *   - Brand signal: pink `#FF2D55` (CTA / LIVE / active chrome — sparingly)
+ *   - Secondary: warm taupe `#C4B5A5` (not neon teal)
+ *   - Page chrome: true black `#000000`
+ *   - Raised surfaces: `#141416` / cards `#121214`
  */
 
 export interface ColorScheme {
@@ -84,33 +84,33 @@ export interface ColorScheme {
 // Warm night — charcoal surfaces; coral is a sparing signal (CTA / LIVE / active).
 // Aligned to web `--blyp-*` in apps/blyp-world/app/globals.css.
 
-const BRAND = '#FF4D6D';
-const BRAND_DIM = '#E83D5C';
-const BRAND_LIGHT = '#FF7A92';
-/** Demoted secondary (was neon cyan); matches web `--blyp-teal`. */
+const BRAND = '#FF2D55';
+const BRAND_DIM = '#E01E45';
+const BRAND_LIGHT = '#FF5C7A';
+/** Demoted secondary (was neon cyan). */
 const WARM_TAUPE = '#C4B5A5';
 const WARM_TAUPE_DIM = '#A89888';
 
 export const darkScheme: ColorScheme = {
-  background: '#12141A',
-  bgGradient: ['#12141A', '#12141A', '#12141A'],
-  chrome: 'rgba(18,20,26,0.92)',
-  headerBackground: '#12141A',
+  background: '#000000',
+  bgGradient: ['#000000', '#000000', '#000000'],
+  chrome: 'rgba(0,0,0,0.92)',
+  headerBackground: '#000000',
 
-  surface: '#1A1C24',
-  surfaceAlt: '#22242E',
-  card: '#16181F',
-  cardSurface: '#1A1C24',
+  surface: '#141416',
+  surfaceAlt: '#1C1C1E',
+  card: '#121214',
+  cardSurface: '#141416',
 
   border: 'rgba(236,234,240,0.12)',
   borderStrong: 'rgba(236,234,240,0.20)',
   divider: 'rgba(236,234,240,0.08)',
 
-  textPrimary: '#ECEAF0',
-  textSecondary: '#9A97A6',
-  textMuted: '#9A97A6',
-  textDisabled: '#6B6878',
-  // White on coral CTAs (matches web `.blyp-studio-launch`).
+  textPrimary: '#FFFFFF',
+  textSecondary: '#A1A1AA',
+  textMuted: '#8E8E93',
+  textDisabled: '#636366',
+  // White on pink CTAs.
   onBrand: '#FFFFFF',
 
   primary: BRAND,
@@ -124,7 +124,7 @@ export const darkScheme: ColorScheme = {
   brandGradient: [BRAND, BRAND, BRAND_DIM],
 
   electric: WARM_TAUPE,
-  electricSoft: 'rgba(255,77,109,0.14)',
+  electricSoft: 'rgba(255,45,85,0.16)',
   electricGradient: [WARM_TAUPE, WARM_TAUPE_DIM],
 
   success: '#34D399',
@@ -143,7 +143,7 @@ export const darkScheme: ColorScheme = {
 };
 
 // Light mode: coral drives accent text/icons on light surfaces.
-const BRAND_TEXT = '#D63A58';
+const BRAND_TEXT = '#E01E45';
 
 export const lightScheme: ColorScheme = {
   background: '#FAFAFA',
@@ -177,7 +177,7 @@ export const lightScheme: ColorScheme = {
   brandGradient: [BRAND, BRAND, BRAND_DIM],
 
   electric: '#8A7A6A',
-  electricSoft: 'rgba(255,77,109,0.10)',
+  electricSoft: 'rgba(255,45,85,0.10)',
   electricGradient: [WARM_TAUPE, WARM_TAUPE_DIM],
 
   success: '#059669',

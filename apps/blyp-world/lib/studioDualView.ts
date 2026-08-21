@@ -214,7 +214,7 @@ export const TOP_LAYOUT_PRESETS: {
     id: "portrait",
     label: "Portrait",
     orientation: "portrait",
-    layout: "solo",
+    layout: "host-top-9",
   },
   {
     id: "landscape",

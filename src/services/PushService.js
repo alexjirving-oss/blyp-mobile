@@ -123,7 +123,7 @@ export async function ensureAndroidChannel() {
       name: 'Blyp',
       importance: Importance.HIGH ?? 4,
       vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#00D2BE',
+      lightColor: '#FF2D55',
       sound: DEFAULT_SOUND,
       lockscreenVisibility: Notifications.AndroidNotificationVisibility?.PUBLIC,
     });
@@ -133,7 +133,7 @@ export async function ensureAndroidChannel() {
       name: 'Incoming calls',
       importance: Importance.MAX ?? 5,
       vibrationPattern: [0, 500, 200, 500, 200, 500],
-      lightColor: '#00D2BE',
+      lightColor: '#FF2D55',
       sound: null,
       bypassDnd: true,
       lockscreenVisibility: Notifications.AndroidNotificationVisibility?.PUBLIC,

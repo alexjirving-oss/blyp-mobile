@@ -20,7 +20,7 @@ import {
 } from '../../utils/followUtils';
 import { pickPublicLabel } from '../../utils/publicLabel';
 
-const TEAL = '#00D2BE';
+const TEAL = '#FF2D55';
 const ROSE = '#FB7185';
 const BG = '#121214';
 const SURFACE = 'rgba(255,255,255,0.06)';
@@ -316,7 +316,7 @@ export default function GuestControlSheet({
           {/* Primary actions */}
           <View style={styles.primaryRow}>
             <TouchableOpacity style={styles.giftBtn} onPress={() => onGift?.(selected)} activeOpacity={0.85}>
-              <Icon name="gift" size={18} color="#0A0A0C" />
+              <Icon name="gift" size={18} color="#FFFFFF" />
               <Text style={styles.giftBtnText} allowFontScaling={false}>Send gift</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.profileBtn} onPress={() => onOpenProfile?.(selected)} activeOpacity={0.85}>
@@ -373,7 +373,7 @@ function ModButton({ icon, label, active, danger, onPress }) {
   const color = danger ? ROSE : active ? TEAL : '#fff';
   return (
     <TouchableOpacity style={styles.modBtn} onPress={onPress} activeOpacity={0.85}>
-      <View style={[styles.modIconWrap, active && { backgroundColor: 'rgba(0,210,190,0.16)' }, danger && { backgroundColor: 'rgba(251,113,133,0.16)' }]}>
+      <View style={[styles.modIconWrap, active && { backgroundColor: 'rgba(255,45,85,0.16)' }, danger && { backgroundColor: 'rgba(251,113,133,0.16)' }]}>
         <Icon name={icon} size={20} color={color} />
       </View>
       <Text style={[styles.modLabel, { color: danger ? ROSE : '#D4D4D8' }]} allowFontScaling={false}>{label}</Text>
@@ -406,14 +406,14 @@ const styles = StyleSheet.create({
   slotText: { color: '#71717A', fontSize: 12, fontWeight: '600' },
   followBtn: { backgroundColor: TEAL, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8 },
   followBtnActive: { backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER },
-  followBtnText: { color: '#0A0A0C', fontWeight: '800', fontSize: 13 },
+  followBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 13 },
   statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 16, paddingHorizontal: 4 },
   stat: { alignItems: 'center', minWidth: 56 },
   statValue: { color: '#fff', fontSize: 16, fontWeight: '800' },
   statLabel: { color: '#71717A', fontSize: 11, marginTop: 2 },
   primaryRow: { flexDirection: 'row', gap: 12, marginTop: 18 },
   giftBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: TEAL, paddingVertical: 13, borderRadius: 14 },
-  giftBtnText: { color: '#0A0A0C', fontWeight: '800', fontSize: 15 },
+  giftBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 15 },
   profileBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER, paddingVertical: 13, borderRadius: 14 },
   profileBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
   challengeBtn: {

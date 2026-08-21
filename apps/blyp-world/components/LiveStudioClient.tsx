@@ -190,6 +190,7 @@ const PIP_SAME_CAM_TOAST =
   "Need a second camera for PIP — this one is already Main. Pick another cam, or put a screen in the corner.";
 import {
   coerceLayout,
+  defaultLayoutFor,
   isStrikeLayout,
   layoutDef,
   layoutsForOrientation,
@@ -633,7 +634,9 @@ export function LiveStudioClient() {
   const [studioTeam, setStudioTeam] = useState<TeamBundle | null>(null);
   const [studioTeamBusy, setStudioTeamBusy] = useState(false);
   const [studioTeamError, setStudioTeamError] = useState<string | null>(null);
-  const [viewerLayout, setViewerLayout] = useState<StageLayoutId>("solo");
+  const [viewerLayout, setViewerLayout] = useState<StageLayoutId>(
+    defaultLayoutFor("portrait"),
+  );
   const [overlayState, setOverlayState] = useState<OverlayState>(loadOverlayState);
   const [overlayMaps, setOverlayMaps] = useState<OverlayPositionsByAspect>(() => ({
     portrait: { ...DEFAULT_OVERLAY_POSITIONS },
@@ -722,8 +725,12 @@ export function LiveStudioClient() {
     "laptop" | "phone" | "screen" | "other"
   >("laptop");
   /** Restore framing when flipping orientation via deck / top presets. */
-  const lastLandscapeLayoutRef = useRef<StageLayoutId>("solo");
-  const lastPortraitLayoutRef = useRef<StageLayoutId>("solo");
+  const lastLandscapeLayoutRef = useRef<StageLayoutId>(
+    defaultLayoutFor("landscape"),
+  );
+  const lastPortraitLayoutRef = useRef<StageLayoutId>(
+    defaultLayoutFor("portrait"),
+  );
   const overlayFeedSnapRef = useRef<OverlayFeedSnapshot | null>(null);
   const overlayRemoteDebounceRef = useRef<number | null>(null);
   const overlayRemoteMaxWaitRef = useRef<number | null>(null);
@@ -2779,7 +2786,7 @@ export function LiveStudioClient() {
     [studioPresets, pushToast, setOverlayPositions],
   );
 
-  /** Solo layout + simple getUserMedia preview on mount (desktop only). */
+  /** Host+9 portrait default + simple getUserMedia preview on mount (desktop only). */
   useEffect(() => {
     if (loading) return;
     if (previewOn || mediaRef.current) return;
@@ -2796,7 +2803,7 @@ export function LiveStudioClient() {
 
     autoPreviewStartedRef.current = true;
     setBoothMode("portrait");
-    setViewerLayout("solo");
+    setViewerLayout(defaultLayoutFor("portrait"));
     setMainSource("laptop");
     setPipOn(false);
     setPipSource("laptop");

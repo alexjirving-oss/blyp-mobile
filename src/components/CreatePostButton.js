@@ -168,7 +168,7 @@ const CreatePostButton = () => {
           accessibilityLabel="Create"
         >
           <View style={styles.fab}>
-            <Icon name="add" size={30} color={COLORS.black} />
+            <Icon name="add" size={30} color={COLORS.white} />
           </View>
         </PressableLift>
       </TourTarget>
@@ -219,7 +219,7 @@ const CreatePostButton = () => {
                 onPress={() => goReview({ mode: 'photo', source: 'camera' })}
               >
                 <View style={styles.postOptionIconContainer}>
-                  <Icon name="camera" size={28} color="#00D2BE" />
+                  <Icon name="camera" size={28} color={COLORS.primary} />
                 </View>
                 <Text style={styles.postOptionText}>Photo</Text>
               </TouchableOpacity>
@@ -229,7 +229,7 @@ const CreatePostButton = () => {
                 onPress={() => goReview({ mode: 'video', source: 'camera' })}
               >
                 <View style={styles.postOptionIconContainer}>
-                    <Icon name="videocam" size={28} color="#00D2BE" />
+                    <Icon name="videocam" size={28} color={COLORS.primary} />
                 </View>
                 <Text style={styles.postOptionText}>Video</Text>
               </TouchableOpacity>

@@ -5,7 +5,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 
 const GOLD = '#F5C542';
-const TEAL = '#00D2BE';
+const TEAL = '#FF2D55';
 const ROSE = '#FB7185';
 const CELEBRATION_DISPLAY_MS = 6_000;
 

@@ -347,7 +347,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   primaryBtnDisabled: { opacity: 0.45 },
-  primaryText: { color: '#0A0A0C', fontWeight: '800', fontSize: responsiveFont(15) },
+  primaryText: { color: '#FFFFFF', fontWeight: '800', fontSize: responsiveFont(15) },
   pledgeRow: {
     flexDirection: 'row',
     alignItems: 'center',

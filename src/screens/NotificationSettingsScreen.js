@@ -213,7 +213,7 @@ const NotificationSettingsScreen = ({ navigation }) => {
             if (next) requestPermission();
             else Linking.openSettings().catch(() => {});
           }}
-          trackColor={{ false: '#141418', true: '#00A89E' }}
+          trackColor={{ false: '#141418', true: '#E01E45' }}
           thumbColor="#F5F5F7"
         />
       </View>
@@ -239,13 +239,13 @@ const NotificationSettingsScreen = ({ navigation }) => {
           </Text>
         </View>
         {busyKey === 'master' ? (
-          <ActivityIndicator color="#00A89E" />
+          <ActivityIndicator color="#E01E45" />
         ) : (
           <Switch
             value={pushMasterOn}
             disabled={!uid || busyKey != null}
             onValueChange={onMasterChange}
-            trackColor={{ false: '#141418', true: '#00A89E' }}
+            trackColor={{ false: '#141418', true: '#E01E45' }}
             thumbColor="#F5F5F7"
           />
         )}
@@ -267,13 +267,13 @@ const NotificationSettingsScreen = ({ navigation }) => {
                   <Text style={styles.rowSubtitle}>{meta.subtitle}</Text>
                 </View>
                 {busyKey === key ? (
-                  <ActivityIndicator color="#00A89E" />
+                  <ActivityIndicator color="#E01E45" />
                 ) : (
                   <Switch
                     value={enabled}
                     disabled={!uid || !pushMasterOn || busyKey != null}
                     onValueChange={(next) => onCategoryChange(key, next)}
-                    trackColor={{ false: '#141418', true: '#00A89E' }}
+                    trackColor={{ false: '#141418', true: '#E01E45' }}
                     thumbColor="#F5F5F7"
                   />
                 )}
@@ -336,8 +336,8 @@ const NotificationSettingsScreen = ({ navigation }) => {
           }
         }}
       >
-        <Icon name="search-outline" size={22} color="#00A89E" />
-        <Text style={[styles.actionText, { color: '#00A89E' }]}>
+        <Icon name="search-outline" size={22} color="#E01E45" />
+        <Text style={[styles.actionText, { color: '#E01E45' }]}>
           Find someone to customize
         </Text>
       </TouchableOpacity>

@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
-const TEAL = '#00D2BE';
+const TEAL = '#FF2D55';
 const GOLD = '#F5C542';
 const GOLD_SOFT = '#FDE68A';
 const INK = '#0A0A0C';
@@ -183,7 +183,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.45)',
+    borderColor: 'rgba(255,45,85,0.45)',
     zIndex: 2,
     elevation: 8,
   },
@@ -229,9 +229,9 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     padding: 12,
     borderRadius: 14,
-    backgroundColor: 'rgba(0,210,190,0.1)',
+    backgroundColor: 'rgba(255,45,85,0.1)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.28)',
+    borderColor: 'rgba(255,45,85,0.28)',
     gap: 4,
   },
   metaLine: { color: TEAL, fontWeight: '800', fontSize: 12 },

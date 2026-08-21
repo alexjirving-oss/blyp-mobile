@@ -262,7 +262,7 @@ const PostPreviewScreen = () => {
               {post.tags.map((tag, index) => (
                 <LinearGradient
                   key={index}
-                  colors={['#00D2BE', '#00D2BE', '#00A89E']}
+                  colors={['#FF2D55', '#FF2D55', '#E01E45']}
                   style={styles.tag}
                 >
                   <Text style={styles.tagText}>#{tag.replace('#', '')}</Text>
@@ -406,7 +406,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   tagText: {
-    color: '#0A0A0C',
+    color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '700',
   },
@@ -462,7 +462,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   backText: {
-    color: '#00D2BE',
+    color: '#FF2D55',
     fontSize: 16,
   },
 });

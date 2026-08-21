@@ -28,7 +28,7 @@ import { updatePostContent } from '../services/postEditService';
 
 const STAGE_COLOR = {
   audition: '#f5a623',
-  rising: '#00d2be',
+  rising: '#FF2D55',
   graduated: '#34c759',
   resting: '#8e8e93',
 };

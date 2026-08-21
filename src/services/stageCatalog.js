@@ -27,12 +27,12 @@ export const STAGE_THEME_PACKS = [
     colors: {
       bg: '#0A0A0C',
       surface: '#141418',
-      accent: '#00D2BE',
-      accentSoft: 'rgba(0,210,190,0.16)',
+      accent: '#FF2D55',
+      accentSoft: 'rgba(255, 45, 85,0.16)',
       text: '#F5F5F7',
       textMuted: '#9CA3AF',
       border: '#27272E',
-      coverFallback: ['#0B1F1C', '#00D2BE'],
+      coverFallback: ['#0B1F1C', '#FF2D55'],
     },
   },
   {
@@ -106,7 +106,7 @@ export const STAGE_WALLPAPERS = [
     id: 'gradient_teal_fade',
     label: 'Teal Fade',
     themeHint: 'midnight_teal',
-    colors: ['#061412', '#0A0A0C', '#00D2BE'],
+    colors: ['#061412', '#0A0A0C', '#FF2D55'],
   },
   {
     id: 'gradient_violet_haze',

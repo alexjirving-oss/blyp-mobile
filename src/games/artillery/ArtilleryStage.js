@@ -14,9 +14,9 @@ import Svg, {
 } from 'react-native-svg';
 import { WORLD, COLS, surfaceAt, terrainPath, UNIT_RADIUS } from './engine';
 
-const TEAL = '#00D2BE';
+const TEAL = '#FF2D55';
 const ROSE = '#FB7185';
-const TEAM_COLORS = ['#00D2BE', '#FB7185'];
+const TEAM_COLORS = ['#FF2D55', '#60A5FA'];
 
 /**
  * ArtilleryStage — the pure SVG battlefield scene.
@@ -61,7 +61,7 @@ export default function ArtilleryStage({
       </Defs>
       <Rect x={0} y={0} width={width} height={height} fill="url(#sky)" />
       {/* Blyp Pulse: soft teal horizon glow */}
-      <Ellipse cx={width * 0.5} cy={height * 0.66} rx={width * 0.75} ry={height * 0.3} fill="#00D2BE" opacity={0.05} />
+      <Ellipse cx={width * 0.5} cy={height * 0.66} rx={width * 0.75} ry={height * 0.3} fill="#FF2D55" opacity={0.05} />
       {/* Blyp watermark */}
       <SvgText x={width * 0.5} y={height * 0.3} fill="#FFFFFF" opacity={0.05} fontSize={height * 0.12} fontWeight="bold" textAnchor="middle">
         blyp.

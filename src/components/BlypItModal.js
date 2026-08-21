@@ -26,7 +26,7 @@ import {
   shareImage,
 } from '../services/blypItService';
 
-const TEAL = '#00D2BE';
+const TEAL = '#FF2D55';
 
 const FRIENDLY_ERROR = {
   subscription_required: {
@@ -304,7 +304,7 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 10,
   },
-  optionSelected: { borderColor: TEAL, backgroundColor: 'rgba(0,210,190,0.08)' },
+  optionSelected: { borderColor: TEAL, backgroundColor: 'rgba(255, 45, 85,0.08)' },
   optionText: { color: '#fff', fontSize: 15, lineHeight: 21 },
   errTitle: { color: '#fff', fontSize: 18, fontWeight: '800', textAlign: 'center', marginBottom: 8 },
   errBody: { color: '#A1A1AA', fontSize: 14, textAlign: 'center', marginBottom: 18, lineHeight: 20 },

@@ -702,7 +702,7 @@ const AuthScreen = () => {
                 disabled={(isLogin ? isSigningIn : loading) || Date.now() < cooldownUntil}
               >
                 <LinearGradient
-                  colors={['#00D2BE', '#00D2BE', '#00A89E']}
+                  colors={[COLORS.primary, COLORS.primary, COLORS.primaryDark]}
                   style={styles.submitGradient}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
@@ -725,7 +725,7 @@ const AuthScreen = () => {
                 disabled={loading || !resetCode.trim() || !newPassword.trim()}
               >
                 <LinearGradient
-                  colors={['#00D2BE', '#00D2BE', '#00A89E']}
+                  colors={[COLORS.primary, COLORS.primary, COLORS.primaryDark]}
                   style={styles.submitGradient}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
@@ -757,7 +757,7 @@ const AuthScreen = () => {
                   disabled={loading || !confirmCode.trim()}
                 >
                   <LinearGradient
-                    colors={['#00D2BE', '#00D2BE', '#00A89E']}
+                    colors={[COLORS.primary, COLORS.primary, COLORS.primaryDark]}
                     style={styles.submitGradient}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 1 }}
@@ -953,7 +953,7 @@ const AuthScreen = () => {
         )}
         {isSigningIn && (
           <View style={styles.authLoadingOverlay}>
-            <ActivityIndicator size="large" color="#00D2BE" />
+            <ActivityIndicator size="large" color={COLORS.primary} />
           </View>
         )}
       </View>
@@ -1027,7 +1027,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   submitText: {
-    color: '#0A0A0C',
+    color: COLORS.white,
     fontSize: 16,
     fontWeight: '800',
   },
@@ -1040,7 +1040,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   toggleLink: {
-    color: '#00D2BE',
+    color: COLORS.primary,
     fontWeight: '700',
   },
   hintText: {
@@ -1093,7 +1093,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   passwordRuleOk: {
-    color: COLORS.primary || '#00D2BE',
+    color: COLORS.primary,
     fontSize: 12,
     lineHeight: 18,
     fontWeight: '600',

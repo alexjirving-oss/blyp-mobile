@@ -776,7 +776,7 @@ const EditProfileScreen = ({ navigation, route }) => {
                       <Icon
                         name={club.icon}
                         size={14}
-                        color={selected ? '#00D2BE' : '#9ca3af'}
+                        color={selected ? '#FF2D55' : '#9ca3af'}
                       />
                       <Text style={[styles.pickChipText, selected && styles.pickChipTextSelected]}>
                         {club.shortLabel || club.label}
@@ -792,11 +792,11 @@ const EditProfileScreen = ({ navigation, route }) => {
                   accessibilityRole="button"
                   accessibilityLabel="Unlock more clubs with Blyp Plus"
                 >
-                  <Icon name="sparkles" size={14} color="#00D2BE" />
+                  <Icon name="sparkles" size={14} color="#FF2D55" />
                   <Text style={styles.upsellHintText}>
                     Free plan: {identityCaps.maxClubs} clubs. Blyp Plus unlocks up to 8.
                   </Text>
-                  <Icon name="chevron-forward" size={14} color="#00D2BE" />
+                  <Icon name="chevron-forward" size={14} color="#FF2D55" />
                 </TouchableOpacity>
               ) : null}
             </View>
@@ -902,7 +902,7 @@ const EditProfileScreen = ({ navigation, route }) => {
               <Icon
                 name={profileVerified ? 'checkmark-circle' : 'shield-outline'}
                 size={22}
-                color={profileVerified ? '#34c759' : '#00D2BE'}
+                color={profileVerified ? '#34c759' : '#FF2D55'}
               />
               <View style={{ flex: 1 }}>
                 <Text style={styles.statusTitle}>
@@ -1151,7 +1151,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   saveButton: {
-    color: '#00D2BE',
+    color: '#FF2D55',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -1185,7 +1185,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 0,
     right: 0,
-    backgroundColor: '#00D2BE',
+    backgroundColor: '#FF2D55',
     borderRadius: 20,
     padding: 8,
     borderWidth: 3,
@@ -1254,8 +1254,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#141418',
   },
   pickChipSelected: {
-    borderColor: 'rgba(0, 210, 190, 0.55)',
-    backgroundColor: 'rgba(0, 210, 190, 0.12)',
+    borderColor: 'rgba(255, 45, 85, 0.55)',
+    backgroundColor: 'rgba(255, 45, 85, 0.12)',
   },
   pickChipBadgeSelected: {
     borderColor: 'rgba(196, 181, 253, 0.5)',
@@ -1292,8 +1292,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(0, 210, 190, 0.28)',
-    backgroundColor: 'rgba(0, 210, 190, 0.08)',
+    borderColor: 'rgba(255, 45, 85, 0.28)',
+    backgroundColor: 'rgba(255, 45, 85, 0.08)',
   },
   upsellHintText: {
     flex: 1,
@@ -1307,7 +1307,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   sectionEyebrow: {
-    color: '#00D2BE',
+    color: '#FF2D55',
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 1.1,
@@ -1384,8 +1384,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   pathChipActive: {
-    borderColor: 'rgba(0, 210, 190, 0.55)',
-    backgroundColor: 'rgba(0, 210, 190, 0.12)',
+    borderColor: 'rgba(255, 45, 85, 0.55)',
+    backgroundColor: 'rgba(255, 45, 85, 0.12)',
   },
   pathChipText: {
     color: '#d1d5db',
@@ -1411,7 +1411,7 @@ const styles = StyleSheet.create({
   },
   verifyButton: {
     marginTop: 18,
-    backgroundColor: '#00D2BE',
+    backgroundColor: '#FF2D55',
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',

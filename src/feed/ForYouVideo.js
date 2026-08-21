@@ -201,7 +201,7 @@ export default function ForYouVideo({
       )}
       {showSpinner && (
         <View style={styles.spinner} pointerEvents="none">
-          <ActivityIndicator color={COLORS.primary || '#00D2BE'} />
+          <ActivityIndicator color={COLORS.primary} />
         </View>
       )}
     </View>

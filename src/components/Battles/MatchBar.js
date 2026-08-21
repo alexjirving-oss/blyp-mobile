@@ -8,7 +8,7 @@ import { View, Text, StyleSheet, Animated, Easing, Image } from 'react-native';
 import { COLORS } from '../../styles/theme';
 import { responsiveFont, responsiveSize } from '../../utils/scaleUtils';
 
-export const MATCH_BAR_LEFT = COLORS.primary; // #00D2BE
+export const MATCH_BAR_LEFT = COLORS.primary; // #FF2D55
 export const MATCH_BAR_RIGHT = '#FF5A45';
 
 const COMBO_IDLE_MS = 2600;

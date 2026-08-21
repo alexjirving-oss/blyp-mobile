@@ -2979,7 +2979,7 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
 
             {isGeneratingDescriptions ? (
               <View style={styles.aiDescribeStatus}>
-                <ActivityIndicator size="small" color="#00D2BE" style={{ marginRight: 8 }} />
+                <ActivityIndicator size="small" color="#FF2D55" style={{ marginRight: 8 }} />
                 <Text style={styles.aiDescribeStatusText}>Describing your media…</Text>
               </View>
             ) : null}
@@ -3056,7 +3056,7 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
                 colors={
                   isPolishingCaption || isGeneratingDescriptions
                     ? ['#666', '#666']
-                    : ['#00D2BE', '#00A89E']
+                    : ['#FF2D55', '#E01E45']
                 }
                 style={styles.aiPrimaryGradient}
               >
@@ -3085,7 +3085,7 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
                   }}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
-                  <Text style={{ color: '#00D2BE', fontWeight: '700', fontSize: 13 }}>Retry</Text>
+                  <Text style={{ color: '#FF2D55', fontWeight: '700', fontSize: 13 }}>Retry</Text>
                 </TouchableOpacity>
               </View>
             ) : null}
@@ -3105,7 +3105,7 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
             disabled={isTranscribing || isGeneratingContent}
           >
             <LinearGradient
-              colors={isRecording ? ['#ff4444', '#ff6b6b'] : ['#00D2BE', '#00A89E']}
+              colors={isRecording ? ['#ff4444', '#ff6b6b'] : ['#FF2D55', '#E01E45']}
               style={styles.voiceButtonGradient}
             >
               {isTranscribing ? (
@@ -3166,7 +3166,7 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
                 disabled={!manualDescription.trim() || isGeneratingFromText || mediaItems.length === 0}
               >
                 <LinearGradient
-                  colors={!manualDescription.trim() ? ['#666', '#666'] : ['#00D2BE', '#00A89E']}
+                  colors={!manualDescription.trim() ? ['#666', '#666'] : ['#FF2D55', '#E01E45']}
                   style={styles.enhanceFromTextGradient}
                 >
                   {isGeneratingFromText ? (
@@ -3174,7 +3174,7 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
                   ) : (
                     <>
                       <Icon  name="sparkles" size={20} color={manualDescription.trim() ? "#0A0A0C" : "white"}  />
-                      <Text style={[styles.enhanceFromTextButtonText, manualDescription.trim() && { color: '#0A0A0C' }]}>Enhance with AI</Text>
+                      <Text style={[styles.enhanceFromTextButtonText, manualDescription.trim() && { color: '#FFFFFF' }]}>Enhance with AI</Text>
                     </>
                   )}
                 </LinearGradient>
@@ -3225,7 +3225,7 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
                 disabled={!manualDescription.trim() || isGeneratingFromText}
               >
                 <LinearGradient
-                  colors={!manualDescription.trim() ? ['#666', '#666'] : ['#00D2BE', '#00A89E']}
+                  colors={!manualDescription.trim() ? ['#666', '#666'] : ['#FF2D55', '#E01E45']}
                   style={styles.enhanceFromTextGradient}
                 >
                   {isGeneratingFromText ? (
@@ -3233,7 +3233,7 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
                   ) : (
                     <>
                       <Icon  name="sparkles" size={20} color={manualDescription.trim() ? "#0A0A0C" : "white"}  />
-                      <Text style={[styles.enhanceFromTextButtonText, manualDescription.trim() && { color: '#0A0A0C' }]}>Enhance with AI</Text>
+                      <Text style={[styles.enhanceFromTextButtonText, manualDescription.trim() && { color: '#FFFFFF' }]}>Enhance with AI</Text>
                     </>
                   )}
                 </LinearGradient>
@@ -3254,7 +3254,7 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
                 setCaption(aiCaption);
               }}
             >
-              <Icon  name="sparkles" size={18} color={contentView === 'ai' ? "#0A0A0C" : "#00D2BE"}  />
+              <Icon  name="sparkles" size={18} color={contentView === 'ai' ? "#0A0A0C" : "#FF2D55"}  />
               <Text style={[styles.toggleButtonText, contentView === 'ai' && styles.activeToggleText]}>AI Enhanced</Text>
             </TouchableOpacity>
             
@@ -3302,11 +3302,11 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
                 onPress={() => handleUseTranscript()}
               >
                 <LinearGradient
-                  colors={['#00D2BE', '#00A89E']}
+                  colors={['#FF2D55', '#E01E45']}
                   style={styles.enhanceAiGradient}
                 >
                   <Icon  name="sparkles" size={20} color="#0A0A0C"  />
-                  <Text style={[styles.enhanceAiButtonText, { color: '#0A0A0C' }]}>Enhance with AI</Text>
+                  <Text style={[styles.enhanceAiButtonText, { color: '#FFFFFF' }]}>Enhance with AI</Text>
                 </LinearGradient>
               </TouchableOpacity>
             </View>
@@ -3333,9 +3333,9 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
                       activeOpacity={0.7}
                     >
                       {isRegeneratingVariants ? (
-                        <ActivityIndicator size="small" color="#00D2BE" />
+                        <ActivityIndicator size="small" color="#FF2D55" />
                       ) : (
-                        <Icon name="refresh" size={14} color="#00D2BE" />
+                        <Icon name="refresh" size={14} color="#FF2D55" />
                       )}
                       <Text style={styles.regenerateButtonText}>
                         {isRegeneratingVariants ? 'Regenerating…' : 'Regenerate'}
@@ -3526,7 +3526,7 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
                   {generatedHashtags.filter(tag => tag && typeof tag === 'string').map((tag, index) => (
                     <TouchableOpacity key={index} style={styles.hashtagChip}>
                       <LinearGradient
-                        colors={['#00D2BE', '#00D2BE', '#00A89E']}
+                        colors={['#FF2D55', '#FF2D55', '#E01E45']}
                         style={styles.hashtagGradient}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 1, y: 0 }}
@@ -3573,8 +3573,8 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
               }}
               disabled={isPolishingCaption || mediaItems.length === 0}
             >
-              <Icon name="sparkles" size={20} color="#00D2BE" />
-              <Text style={[styles.actionButtonText, { color: '#00D2BE' }]}>
+              <Icon name="sparkles" size={20} color="#FF2D55" />
+              <Text style={[styles.actionButtonText, { color: '#FF2D55' }]}>
                 {isPolishingCaption ? 'Writing…' : 'Generate AI'}
               </Text>
             </TouchableOpacity>
@@ -3592,7 +3592,7 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
           <View style={styles.magicStatusChip}>
             {isGeneratingDescriptions || isPolishingCaption ? (
               <>
-                <ActivityIndicator size="small" color="#00D2BE" style={{ marginRight: 8 }} />
+                <ActivityIndicator size="small" color="#FF2D55" style={{ marginRight: 8 }} />
                 <Text style={styles.magicStatusText}>
                   {isGeneratingDescriptions ? 'Describing media…' : 'Writing 3 options…'}
                 </Text>
@@ -3614,7 +3614,7 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
                   style={{ marginLeft: 10 }}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
-                  <Text style={{ color: '#00D2BE', fontWeight: '700', fontSize: 13 }}>Retry</Text>
+                  <Text style={{ color: '#FF2D55', fontWeight: '700', fontSize: 13 }}>Retry</Text>
                 </TouchableOpacity>
               </>
             )}
@@ -3626,7 +3626,7 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
           disabled={isUploading}
         >
           <LinearGradient
-            colors={isUploading ? ['#6b7280', '#6b7280'] : ['#00D2BE', '#00D2BE', '#00A89E']}
+            colors={isUploading ? ['#6b7280', '#6b7280'] : ['#FF2D55', '#FF2D55', '#E01E45']}
             style={styles.postGradient}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
@@ -3637,7 +3637,7 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
                 <Text style={styles.postButtonText}>Posting...</Text>
               </>
             ) : (
-              <Text style={[styles.postButtonText, { color: '#0A0A0C' }]}>Post</Text>
+              <Text style={[styles.postButtonText, { color: '#FFFFFF' }]}>Post</Text>
             )}
           </LinearGradient>
         </TouchableOpacity>
@@ -3728,7 +3728,7 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
               style={styles.aiOverlayGradient}
             >
               <View style={styles.aiIconContainer}>
-                <Icon  name="sparkles" size={48} color="#00D2BE"  />
+                <Icon  name="sparkles" size={48} color="#FF2D55"  />
               </View>
               <Text style={styles.aiOverlayTitle}>Analyzing Media</Text>
               <Text style={styles.aiOverlaySubtitle}>AI is examining your photos and videos...</Text>
@@ -3778,7 +3778,7 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
               style={styles.aiOverlayGradient}
             >
               <View style={styles.aiIconContainer}>
-                <Icon  name="cloud-upload" size={48} color="#00D2BE"  />
+                <Icon  name="cloud-upload" size={48} color="#FF2D55"  />
               </View>
               <Text style={styles.aiOverlayTitle}>Uploading Your Post</Text>
               <Text style={styles.aiOverlaySubtitle}>{uploadStatusText || 'Preparing your content…'}</Text>
@@ -3803,7 +3803,7 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
               style={styles.aiOverlayGradient}
             >
               <View style={styles.aiIconContainer}>
-                <Icon  name="sparkles" size={48} color="#00D2BE"  />
+                <Icon  name="sparkles" size={48} color="#FF2D55"  />
               </View>
               <Text style={styles.aiOverlayTitle}>Blyp AI Processing</Text>
               <Text style={styles.aiOverlaySubtitle}>Blyp AI is now generating your post...</Text>
@@ -3830,7 +3830,7 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
               {/* Header */}
               <View style={styles.stepByStepHeader}>
                 <View style={styles.stepByStepIconContainer}>
-                  <Icon  name="sparkles" size={32} color="#00D2BE"  />
+                  <Icon  name="sparkles" size={32} color="#FF2D55"  />
                 </View>
                 <Text style={styles.stepByStepTitle}>Creating Your Post</Text>
                 <Text style={styles.stepByStepSubtitle}>
@@ -3845,7 +3845,7 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
                     <View style={[
                       styles.stepNumber,
                       index <= currentStep ? styles.stepNumberActive : styles.stepNumberInactive,
-                      step.isVoice && { backgroundColor: '#00D2BE' }
+                      step.isVoice && { backgroundColor: '#FF2D55' }
                     ]}>
                       {step.isVoice ? (
                         index < currentStep ? (
@@ -3876,7 +3876,7 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
                         <Text style={[
                           styles.stepDescription,
                           index <= currentStep ? styles.stepDescriptionActive : styles.stepDescriptionInactive,
-                          step.isVoice && { fontStyle: 'italic', color: '#00D2BE' }
+                          step.isVoice && { fontStyle: 'italic', color: '#FF2D55' }
                         ]}>
                           {step.isVoice && step.completed ? `"${step.fullDescription || step.description}"` : step.description}
                         </Text>
@@ -3914,7 +3914,7 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
               {/* Header */}
               <View style={styles.reviewHeader}>
                 <View style={styles.reviewIconContainer}>
-                  <Icon  name="document-text" size={32} color="#00D2BE"  />
+                  <Icon  name="document-text" size={32} color="#FF2D55"  />
                 </View>
                 <Text style={styles.reviewTitle}>Review & Generate</Text>
                 <Text style={styles.reviewSubtitle}>
@@ -4135,7 +4135,7 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
               {/* Header with camera icon */}
               <View style={styles.multiPhotoModalHeader}>
                 <View style={styles.multiPhotoIconContainer}>
-                  <Icon  name="camera" size={32} color="#00D2BE"  />
+                  <Icon  name="camera" size={32} color="#FF2D55"  />
                 </View>
                 <Text style={styles.multiPhotoModalTitle}>Photo Captured!</Text>
                 <Text style={styles.multiPhotoModalSubtitle}>
@@ -4319,7 +4319,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   aiDescribeRetry: {
-    color: '#00D2BE',
+    color: '#FF2D55',
     fontSize: 13,
     fontWeight: '700',
   },
@@ -4373,7 +4373,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
   },
   aiPrimaryButtonText: {
-    color: '#0A0A0C',
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '800',
     letterSpacing: 0.2,
@@ -4509,7 +4509,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   aiTitle: {
-    color: '#00D2BE',
+    color: '#FF2D55',
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
@@ -4532,7 +4532,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   activeToggleButton: {
-    backgroundColor: '#00D2BE',
+    backgroundColor: '#FF2D55',
   },
   toggleButtonText: {
     color: '#9ca3af',
@@ -4541,7 +4541,7 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
   activeToggleText: {
-    color: '#0A0A0C',
+    color: '#FFFFFF',
   },
   transcriptContainer: {
     backgroundColor: COLORS.surface,
@@ -4622,7 +4622,7 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   regenerateButtonText: {
-    color: '#00D2BE',
+    color: '#FF2D55',
     fontSize: 12,
     fontWeight: '600',
     marginLeft: 5,
@@ -4638,7 +4638,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   variantCardSelected: {
-    borderColor: '#00D2BE',
+    borderColor: '#FF2D55',
     backgroundColor: 'rgba(203,251,69,0.08)',
   },
   variantRadio: {
@@ -4653,8 +4653,8 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   variantRadioSelected: {
-    borderColor: '#00D2BE',
-    backgroundColor: '#00D2BE',
+    borderColor: '#FF2D55',
+    backgroundColor: '#FF2D55',
   },
   variantBody: {
     flex: 1,
@@ -4677,7 +4677,7 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
   variantHashtags: {
-    color: '#00D2BE',
+    color: '#FF2D55',
     fontSize: 12,
     marginTop: 6,
     opacity: 0.85,
@@ -4742,7 +4742,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   categoryChipActive: {
-    backgroundColor: '#00D2BE',
+    backgroundColor: '#FF2D55',
   },
   hashtagGradient: {
     paddingHorizontal: 12,
@@ -4755,16 +4755,16 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   categoryChipTextActive: {
-    color: '#0A0A0C',
+    color: '#FFFFFF',
   },
   useAiButton: {
-    backgroundColor: '#00D2BE',
+    backgroundColor: '#FF2D55',
     borderRadius: 8,
     paddingVertical: 12,
     alignItems: 'center',
   },
   useAiButtonText: {
-    color: '#0A0A0C',
+    color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -4874,10 +4874,10 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#00D2BE',
+    borderColor: '#FF2D55',
   },
   enhanceButtonText: {
-    color: '#00D2BE',
+    color: '#FF2D55',
     fontSize: 12,
     fontWeight: '600',
     marginLeft: 4,
@@ -5271,7 +5271,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   aiSummaryTitle: {
-    color: '#00D2BE',
+    color: '#FF2D55',
     fontSize: 18,
     fontWeight: '700',
     marginLeft: 8,

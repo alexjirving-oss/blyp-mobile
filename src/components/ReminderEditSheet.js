@@ -83,7 +83,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     marginBottom: 8,
   },
-  optionRowOn: { borderColor: COLORS.primary, backgroundColor: 'rgba(0,210,190,0.10)' },
+  optionRowOn: { borderColor: COLORS.primary, backgroundColor: 'rgba(255, 45, 85,0.10)' },
   optionText: { color: COLORS.textPrimary, fontSize: responsiveFont(15), fontWeight: '600' },
   optionTextOn: { color: COLORS.primary, fontWeight: '800' },
   deleteBtn: {

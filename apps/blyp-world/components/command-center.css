@@ -1168,7 +1168,9 @@
 
 /* Program canvas fills the screen inset — sizing lives on .tls-device. */
 .tls-device .tls-phone,
-.tls-device .bomb-strike-stage.tls-phone {
+.tls-device .bomb-strike-stage.tls-phone,
+.tls-booth-theater .tls-device .tls-phone,
+.tls-booth-theater .tls-device .bomb-strike-stage.tls-phone {
   width: 100% !important;
   height: 100% !important;
   max-width: none !important;
@@ -2990,10 +2992,11 @@
 }
 
 .tls-rail-jukebox {
-  flex: 1.35 1 auto;
-  min-height: 22rem;
-  overflow-y: auto;
-  flex-shrink: 0;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .tls-rail-chat {
@@ -3930,6 +3933,31 @@ body:has(.tls-overlay-source) {
 
   .tls-booth-team-desk .tls-body {
     grid-template-columns: minmax(248px, 280px) minmax(0, 1fr) minmax(220px, 260px);
+  }
+
+  .tls-booth-theater .tls-body {
+    display: grid;
+    flex: 1 1 0;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .tls-booth-theater .tls-center {
+    flex: 1 1 0;
+    height: 100%;
+    min-height: 0;
+    max-height: none;
+    width: auto;
+  }
+
+  .tls-booth-theater .tls-left,
+  .tls-booth-theater .tls-right {
+    height: 100%;
+    min-height: 0;
+    max-height: none;
+    overflow-x: hidden;
+    overflow-y: auto;
   }
 
   .tls-left,
@@ -5365,7 +5393,25 @@ button.tls-dest-card:hover {
 }
 
 .tls-booth .tls-rail-jukebox {
-  min-height: 16rem;
+  min-height: 0;
+  flex: 1 1 0;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.tls-booth .jbx-cabinet {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.tls-booth .jbx-cabinet > .jbx {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .tls-booth .tls-rail-chat {

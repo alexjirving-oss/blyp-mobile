@@ -178,7 +178,7 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   bannerText: {
-    color: '#0A0A0C',
+    color: '#FFFFFF',
     fontWeight: '900',
     fontSize: responsiveFont(15),
     flexShrink: 1,
@@ -194,7 +194,7 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   rematchText: {
-    color: '#0A0A0C',
+    color: '#FFFFFF',
     fontWeight: '900',
     fontSize: responsiveFont(15),
   },

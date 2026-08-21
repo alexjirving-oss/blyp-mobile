@@ -94,9 +94,9 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     borderRadius: 16,
     borderWidth: 1.5,
-    borderColor: 'rgba(0,210,190,0.35)',
+    borderColor: 'rgba(255,45,85,0.35)',
     borderStyle: 'dashed',
-    backgroundColor: 'rgba(0,210,190,0.05)',
+    backgroundColor: 'rgba(255,45,85,0.05)',
     overflow: 'hidden',
   },
   editWrapOff: {
@@ -133,9 +133,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
-    backgroundColor: 'rgba(0,210,190,0.18)',
+    backgroundColor: 'rgba(255,45,85,0.18)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.4)',
+    borderColor: 'rgba(255,45,85,0.4)',
   },
   proPillText: {
     color: COLORS.primary,

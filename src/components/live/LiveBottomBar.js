@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Icon from '../Icon';
+import { COLORS } from '../../styles/theme';
 
 /**
  * Viewer live bottom bar — gift/game sheet materials.
@@ -16,15 +17,19 @@ export default function LiveBottomBar({
   showGames = false,
   gamesActive = false,
   likeCount,
+  shareCount,
   likeScale,
+  variant = 'default',
 }) {
   const scaleStyle = likeScale ? { transform: [{ scale: likeScale }] } : null;
   const showLikeCount = Number.isFinite(Number(likeCount));
+  const showShareCount = Number.isFinite(Number(shareCount));
+  const isHostTop9 = variant === 'hostTop9';
 
   return (
     <View style={styles.container} pointerEvents="box-none">
       <TouchableOpacity
-        style={styles.commentField}
+        style={[styles.commentField, isHostTop9 && styles.commentFieldPink]}
         onPress={onPressComment}
         activeOpacity={0.82}
         accessibilityRole="button"
@@ -67,14 +72,14 @@ export default function LiveBottomBar({
           accessibilityLabel="Send gift"
         >
           <LinearGradient
-            colors={['#5EEAD4', '#00D2BE', '#0D9488']}
+            colors={[COLORS.primaryLight, COLORS.primary, COLORS.primaryDark]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.giftRing}
           >
             <View style={styles.giftInner}>
               <View style={styles.giftGloss} pointerEvents="none" />
-              <Icon name="gift" size={20} color="#5EEAD4" />
+              <Icon name="gift" size={20} color="#fff" />
             </View>
           </LinearGradient>
           <Text style={[styles.actionLabel, styles.giftLabel]} allowFontScaling={false}>
@@ -113,8 +118,13 @@ export default function LiveBottomBar({
           accessibilityRole="button"
           accessibilityLabel="Share live"
         >
-          <View style={styles.actionButton}>
+          <View style={[styles.actionButton, showShareCount && styles.likeButton]}>
             <Icon name="share" size={18} color="#fff" />
+            {showShareCount ? (
+              <Text style={styles.likeCount} allowFontScaling={false}>
+                {Number(shareCount) > 999 ? '999+' : String(shareCount)}
+              </Text>
+            ) : null}
           </View>
           <Text style={styles.actionLabel} allowFontScaling={false}>
             SHARE
@@ -134,6 +144,9 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     gap: 10,
   },
+  commentFieldPink: {
+    borderColor: 'rgba(255,45,85,0.45)',
+  },
   commentField: {
     flex: 1,
     flexDirection: 'row',
@@ -144,7 +157,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     backgroundColor: 'rgba(10,10,12,0.86)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.34)',
+    borderColor: 'rgba(255,45,85,0.34)',
     marginBottom: 14,
   },
   commentPlaceholder: {
@@ -207,7 +220,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(10,10,12,0.92)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.28)',
+    borderColor: 'rgba(255,45,85,0.28)',
     overflow: 'hidden',
   },
   giftGloss: {
@@ -231,7 +244,7 @@ const styles = StyleSheet.create({
     marginTop: 5,
   },
   giftLabel: {
-    color: '#5EEAD4',
+    color: COLORS.primary,
   },
   gamesLabelActive: {
     color: '#FDE68A',

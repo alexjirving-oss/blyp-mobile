@@ -304,14 +304,14 @@ const ProfileScreen = () => {
           style={[styles.tabButton, selectedTab === 'posts' && styles.activeTab]}
           onPress={() => setSelectedTab('posts')}
         >
-          <Icon name="grid-outline" size={24} color={selectedTab === 'posts' ? '#00D2BE' : '#A1A1AA'} />
+          <Icon name="grid-outline" size={24} color={selectedTab === 'posts' ? '#FF2D55' : '#A1A1AA'} />
           <Text style={[styles.tabLabel, selectedTab === 'posts' && styles.activeTabLabel]}>Posts</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.tabButton, selectedTab === 'likes' && styles.activeTab]}
           onPress={() => setSelectedTab('likes')}
         >
-          <Icon name="heart-outline" size={24} color={selectedTab === 'likes' ? '#00D2BE' : '#A1A1AA'} />
+          <Icon name="heart-outline" size={24} color={selectedTab === 'likes' ? '#FF2D55' : '#A1A1AA'} />
           <Text style={[styles.tabLabel, selectedTab === 'likes' && styles.activeTabLabel]}>Likes</Text>
         </TouchableOpacity>
       </View>
@@ -320,7 +320,7 @@ const ProfileScreen = () => {
 
   const renderListEmpty = () => {
     if (loading && selectedTab === 'posts') {
-      return <View style={styles.emptyState}><Icon name="reload-circle-outline" size={48} color="#00D2BE" /><Text style={styles.emptyText}>Loading...</Text></View>;
+      return <View style={styles.emptyState}><Icon name="reload-circle-outline" size={48} color="#FF2D55" /><Text style={styles.emptyText}>Loading...</Text></View>;
     }
     if (!firebaseEnabled) {
       return <View style={styles.emptyState}><Icon name="cloud-offline-outline" size={48} color="#6b7280" /><Text style={styles.emptyText}>Offline mode</Text><Text style={styles.emptySubtext}>Posts unavailable</Text></View>;
@@ -377,7 +377,7 @@ const ProfileScreen = () => {
           numColumns={3}
           ListHeaderComponent={renderListHeader}
           ListEmptyComponent={renderListEmpty}
-          ListFooterComponent={loadingMore ? <View style={styles.footerLoader}><ActivityIndicator size="small" color="#00D2BE" /></View> : null}
+          ListFooterComponent={loadingMore ? <View style={styles.footerLoader}><ActivityIndicator size="small" color="#FF2D55" /></View> : null}
           onEndReached={selectedTab === 'posts' ? loadMorePosts : loadMoreLikes}
           onEndReachedThreshold={1}
           showsVerticalScrollIndicator={false}
@@ -417,9 +417,9 @@ const styles = StyleSheet.create({
   editProfileText: { color: '#fff', fontSize: 15, fontWeight: '600' },
   tabBar: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#141418', paddingHorizontal: 16 },
   tabButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, gap: 6, borderBottomWidth: 2, borderBottomColor: 'transparent' },
-  activeTab: { borderBottomColor: '#00D2BE' },
+  activeTab: { borderBottomColor: '#FF2D55' },
   tabLabel: { fontSize: 14, fontWeight: '600', color: '#A1A1AA' },
-  activeTabLabel: { color: '#00D2BE' },
+  activeTabLabel: { color: '#FF2D55' },
   gridContainer: { paddingTop: 2 },
   gridItem: { flex: 1 / 3, aspectRatio: 1, margin: 1, backgroundColor: '#141418', position: 'relative' },
   gridImage: { width: '100%', height: '100%' },

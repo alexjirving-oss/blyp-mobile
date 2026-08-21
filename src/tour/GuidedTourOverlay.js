@@ -186,7 +186,7 @@ export default function GuidedTourOverlay({
         <BlurView intensity={28} tint="dark" style={styles.blur}>
           <View style={styles.cardInner}>
             <LinearGradient
-              colors={['rgba(0,210,190,0.95)', 'rgba(0,210,190,0.2)', 'transparent']}
+              colors={['rgba(255, 45, 85,0.95)', 'rgba(255, 45, 85,0.2)', 'transparent']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={styles.accentBar}
@@ -247,7 +247,7 @@ const styles = StyleSheet.create({
     left: 0,
     top: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,210,190,0.35)',
+    backgroundColor: 'rgba(255, 45, 85,0.35)',
   },
   progressLabel: {
     color: COLORS.textMuted || 'rgba(148,163,184,0.95)',
@@ -273,8 +273,8 @@ const styles = StyleSheet.create({
     borderRadius: responsiveSize(18),
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.28)',
-    shadowColor: '#00D2BE',
+    borderColor: 'rgba(255, 45, 85,0.28)',
+    shadowColor: '#FF2D55',
     shadowOpacity: 0.2,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },

@@ -20,7 +20,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
-const TEAL = '#00D2BE';
+const TEAL = '#FF2D55';
 const GOLD = '#F5C542';
 const GOLD_SOFT = '#FDE68A';
 const ROSE = '#FB7185';
@@ -109,7 +109,7 @@ function RowToggle({ label, value, onValueChange, hint, disabled }) {
         value={!!value}
         onValueChange={onValueChange}
         disabled={disabled}
-        trackColor={{ false: 'rgba(255,255,255,0.18)', true: 'rgba(0,210,190,0.55)' }}
+        trackColor={{ false: 'rgba(255,255,255,0.18)', true: 'rgba(255,45,85,0.55)' }}
         thumbColor={value ? TEAL : '#ccc'}
       />
     </View>
@@ -569,7 +569,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.15)',
   },
-  chipOn: { backgroundColor: 'rgba(0,210,190,0.22)', borderColor: TEAL },
+  chipOn: { backgroundColor: 'rgba(255,45,85,0.22)', borderColor: TEAL },
   chipDisabled: { opacity: 0.55 },
   chipText: { color: 'rgba(255,255,255,0.7)', fontWeight: '800', fontSize: 13 },
   chipTextOn: { color: TEAL },
@@ -598,5 +598,5 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
     alignItems: 'center',
   },
-  saveText: { color: INK, fontWeight: '900', fontSize: 15 },
+  saveText: { color: '#FFFFFF', fontWeight: '900', fontSize: 15 },
 });

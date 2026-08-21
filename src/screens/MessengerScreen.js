@@ -2028,7 +2028,7 @@ const styles = StyleSheet.create({
     borderRadius: 21,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: withAlpha(T.primary || '#00D2BE', 0.12),
+    backgroundColor: withAlpha(T.primary || '#FF2D55', 0.12),
     marginLeft: 8,
   },
   callEmptyIconWrap: {
@@ -2037,9 +2037,9 @@ const styles = StyleSheet.create({
     borderRadius: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: withAlpha(T.primary || '#00D2BE', 0.12),
+    backgroundColor: withAlpha(T.primary || '#FF2D55', 0.12),
     borderWidth: 1,
-    borderColor: withAlpha(T.primary || '#00D2BE', 0.28),
+    borderColor: withAlpha(T.primary || '#FF2D55', 0.28),
     marginBottom: 8,
   },
 

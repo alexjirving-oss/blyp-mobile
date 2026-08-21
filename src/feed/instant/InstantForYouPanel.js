@@ -479,7 +479,7 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 22,
     borderWidth: 2,
-    borderColor: COLORS.primary || '#00D2BE',
+    borderColor: COLORS.primary,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(10,10,12,0.45)',

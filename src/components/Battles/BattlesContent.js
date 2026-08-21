@@ -299,7 +299,7 @@ export default function BattlesContent({ navigation }) {
       <View style={styles.hero}>
         <Animated.View style={[styles.heroGlow, { opacity: pulseOpacity }]} pointerEvents="none">
           <LinearGradient
-            colors={['rgba(0,210,190,0.4)', 'rgba(0,168,158,0.05)', 'transparent']}
+            colors={['rgba(255, 45, 85,0.4)', 'rgba(224, 30, 69,0.05)', 'transparent']}
             style={StyleSheet.absoluteFill}
           />
         </Animated.View>
@@ -468,7 +468,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: '#0E1214',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.22)',
+    borderColor: 'rgba(255, 45, 85,0.22)',
     padding: responsiveSize(18),
     marginBottom: responsiveSize(16),
   },
@@ -522,8 +522,8 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     borderRadius: responsiveSize(14),
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.28)',
-    backgroundColor: 'rgba(0,210,190,0.06)',
+    borderColor: 'rgba(255, 45, 85,0.28)',
+    backgroundColor: 'rgba(255, 45, 85,0.06)',
     overflow: 'hidden',
   },
   hqActionAccent: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
@@ -535,19 +535,19 @@ const styles = StyleSheet.create({
   },
   hqActionBody: { flex: 1 },
   hqActionText: { color: COLORS.textPrimary, fontWeight: '800', fontSize: responsiveFont(13) },
-  hqActionTextAccent: { color: '#0A0A0C' },
+  hqActionTextAccent: { color: '#FFFFFF' },
   hqActionSub: { color: COLORS.textMuted, fontSize: responsiveFont(11), marginTop: 2 },
   hqActionSubAccent: { color: 'rgba(10,10,12,0.65)' },
   teamBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: responsiveSize(12),
-    backgroundColor: 'rgba(0,210,190,0.08)',
+    backgroundColor: 'rgba(255, 45, 85,0.08)',
     borderRadius: responsiveSize(14),
     padding: responsiveSize(14),
     marginBottom: responsiveSize(12),
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.25)',
+    borderColor: 'rgba(255, 45, 85,0.25)',
   },
   teamBannerTitle: { color: COLORS.textPrimary, fontWeight: '800', fontSize: responsiveFont(14) },
   teamBannerSub: { color: COLORS.textSecondary, fontSize: responsiveFont(12), marginTop: 2 },
@@ -560,7 +560,7 @@ const styles = StyleSheet.create({
     padding: responsiveSize(14),
     marginBottom: responsiveSize(14),
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.18)',
+    borderColor: 'rgba(255, 45, 85,0.18)',
   },
   roomsButtonBody: { flex: 1 },
   roomsButtonText: { color: COLORS.textPrimary, fontWeight: '700', fontSize: responsiveFont(14) },
@@ -574,7 +574,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.06)',
   },
-  filterChipOn: { backgroundColor: 'rgba(0,210,190,0.16)', borderColor: COLORS.primary },
+  filterChipOn: { backgroundColor: 'rgba(255, 45, 85,0.16)', borderColor: COLORS.primary },
   filterChipDisabled: { opacity: 0.35 },
   filterText: { color: COLORS.textSecondary, fontWeight: '700', fontSize: responsiveFont(12) },
   filterTextOn: { color: COLORS.primary },
@@ -606,7 +606,7 @@ const styles = StyleSheet.create({
     paddingVertical: responsiveSize(7),
   },
   requestActionPending: { backgroundColor: 'rgba(255,255,255,0.08)' },
-  requestActionText: { color: '#0A0A0C', fontWeight: '800', fontSize: responsiveFont(11) },
+  requestActionText: { color: '#FFFFFF', fontWeight: '800', fontSize: responsiveFont(11) },
   requestActionTextPending: { color: COLORS.textSecondary },
   card: {
     backgroundColor: COLORS.backgroundCard,
@@ -641,7 +641,7 @@ const styles = StyleSheet.create({
     width: responsiveSize(40),
     height: responsiveSize(40),
     borderRadius: responsiveSize(20),
-    backgroundColor: 'rgba(0,210,190,0.12)',
+    backgroundColor: 'rgba(255, 45, 85,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
     marginHorizontal: responsiveSize(8),
@@ -673,8 +673,8 @@ const styles = StyleSheet.create({
     paddingVertical: responsiveSize(5),
     paddingHorizontal: responsiveSize(10),
   },
-  stakeChip: { backgroundColor: 'rgba(0,210,190,0.10)' },
-  teamChip: { backgroundColor: 'rgba(0,210,190,0.10)' },
+  stakeChip: { backgroundColor: 'rgba(255, 45, 85,0.10)' },
+  teamChip: { backgroundColor: 'rgba(255, 45, 85,0.10)' },
   metaChipText: { color: COLORS.textSecondary, fontSize: responsiveFont(12), fontWeight: '600' },
   liveDot: { width: responsiveSize(8), height: responsiveSize(8), borderRadius: responsiveSize(4), backgroundColor: '#ef4444' },
   liveText: { color: '#ef4444', fontSize: responsiveFont(12), fontWeight: '800' },
@@ -683,5 +683,5 @@ const styles = StyleSheet.create({
   emptySub: { color: COLORS.textSecondary, fontSize: responsiveFont(12), opacity: 0.7, textAlign: 'center' },
   emptyCta: { marginTop: responsiveSize(10), backgroundColor: COLORS.primary, borderRadius: responsiveSize(14), overflow: 'hidden' },
   emptyCtaInner: { paddingVertical: responsiveSize(12), paddingHorizontal: responsiveSize(18) },
-  emptyCtaText: { color: '#0A0A0C', fontWeight: '800', fontSize: responsiveFont(14) },
+  emptyCtaText: { color: '#FFFFFF', fontWeight: '800', fontSize: responsiveFont(14) },
 });

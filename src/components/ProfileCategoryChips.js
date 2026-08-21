@@ -79,7 +79,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   chipTextActive: {
-    color: '#0A0A0C',
+    color: '#FFFFFF',
   },
   manageChip: {
     flexDirection: 'row',
@@ -89,8 +89,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.45)',
-    backgroundColor: 'rgba(0,210,190,0.12)',
+    borderColor: 'rgba(255, 45, 85,0.45)',
+    backgroundColor: 'rgba(255, 45, 85,0.12)',
   },
   manageText: {
     color: COLORS.primary,

@@ -261,7 +261,7 @@ export default function EditStageScreen({ navigation }) {
       <ScreenContainer>
         <SafeAreaView style={styles.container}>
           <View style={styles.loadingBox}>
-            <ActivityIndicator color="#00D2BE" size="large" />
+            <ActivityIndicator color="#FF2D55" size="large" />
             <Text style={styles.loadingText}>Loading Stage…</Text>
           </View>
         </SafeAreaView>
@@ -280,7 +280,7 @@ export default function EditStageScreen({ navigation }) {
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Stage preview</Text>
             <TouchableOpacity onPress={onSave} style={styles.headerBtn} disabled={saving}>
-              {saving ? <ActivityIndicator color="#00D2BE" /> : <Text style={styles.saveText}>Save</Text>}
+              {saving ? <ActivityIndicator color="#FF2D55" /> : <Text style={styles.saveText}>Save</Text>}
             </TouchableOpacity>
           </View>
           <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
@@ -312,7 +312,7 @@ export default function EditStageScreen({ navigation }) {
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Edit Stage</Text>
           <TouchableOpacity onPress={onSave} style={styles.headerBtn} disabled={saving}>
-            {saving ? <ActivityIndicator color="#00D2BE" /> : <Text style={styles.saveText}>Save</Text>}
+            {saving ? <ActivityIndicator color="#FF2D55" /> : <Text style={styles.saveText}>Save</Text>}
           </TouchableOpacity>
         </View>
 
@@ -322,7 +322,7 @@ export default function EditStageScreen({ navigation }) {
           keyboardShouldPersistTaps="handled"
         >
           <TouchableOpacity style={styles.previewCta} onPress={() => setPreviewMode(true)} activeOpacity={0.88}>
-            <LinearGradient colors={['#00D2BE', '#00A89E']} style={styles.previewCtaGrad}>
+            <LinearGradient colors={['#FF2D55', '#E01E45']} style={styles.previewCtaGrad}>
               <Icon name="eye-outline" size={18} color="#0A0A0C" />
               <Text style={styles.previewCtaText}>Preview Stage</Text>
             </LinearGradient>
@@ -334,7 +334,7 @@ export default function EditStageScreen({ navigation }) {
               <Image source={{ uri: coverLocalUri || cfg.coverUrl }} style={styles.coverPreview} />
             ) : (
               <LinearGradient
-                colors={theme?.colors?.coverFallback || ['#0A0A0C', '#00D2BE']}
+                colors={theme?.colors?.coverFallback || ['#0A0A0C', '#FF2D55']}
                 style={styles.coverPreview}
               />
             )}
@@ -360,7 +360,7 @@ export default function EditStageScreen({ navigation }) {
                       themeId: prev.themeId || w.themeHint,
                     }));
                   }}
-                  style={[styles.wallCard, selected && { borderColor: '#00D2BE' }]}
+                  style={[styles.wallCard, selected && { borderColor: '#FF2D55' }]}
                 >
                   <LinearGradient colors={w.colors} style={styles.wallSwatch} />
                   <Text style={styles.wallLabel}>{w.label}</Text>
@@ -482,7 +482,7 @@ export default function EditStageScreen({ navigation }) {
               return (
                 <TouchableOpacity
                   key={post.id}
-                  style={[styles.pinPick, on && { borderColor: '#00D2BE' }]}
+                  style={[styles.pinPick, on && { borderColor: '#FF2D55' }]}
                   onPress={() => togglePin(post.id)}
                 >
                   {thumb ? (
@@ -520,7 +520,7 @@ export default function EditStageScreen({ navigation }) {
                     modules: { ...prev.modules, [key]: v },
                   }))
                 }
-                trackColor={{ false: '#27272E', true: '#00A89E' }}
+                trackColor={{ false: '#27272E', true: '#E01E45' }}
                 thumbColor="#fff"
               />
             </View>
@@ -534,7 +534,7 @@ export default function EditStageScreen({ navigation }) {
             <Switch
               value={cfg.showPastLives === true}
               onValueChange={(v) => setCfg((prev) => ({ ...prev, showPastLives: v }))}
-              trackColor={{ false: '#27272E', true: '#00A89E' }}
+              trackColor={{ false: '#27272E', true: '#E01E45' }}
               thumbColor="#fff"
             />
           </View>
@@ -563,7 +563,7 @@ const styles = StyleSheet.create({
   },
   headerBtn: { minWidth: 64, padding: 8, alignItems: 'center' },
   headerTitle: { color: '#fff', fontSize: 17, fontWeight: '700' },
-  saveText: { color: '#00D2BE', fontWeight: '700', fontSize: 16 },
+  saveText: { color: '#FF2D55', fontWeight: '700', fontSize: 16 },
   scroll: { flex: 1, width: '100%' },
   scrollContent: { alignSelf: 'center', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 48 },
   previewCta: { borderRadius: 14, overflow: 'hidden', marginBottom: 18 },
@@ -574,7 +574,7 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 13,
   },
-  previewCtaText: { color: '#0A0A0C', fontWeight: '800', fontSize: 15 },
+  previewCtaText: { color: '#FFFFFF', fontWeight: '800', fontSize: 15 },
   sectionTitle: {
     color: '#F5F5F7',
     fontSize: 16,
@@ -646,13 +646,13 @@ const styles = StyleSheet.create({
   removeLinkText: { color: '#FB7185', fontWeight: '600' },
   secondaryBtn: {
     borderWidth: 1,
-    borderColor: '#00D2BE',
+    borderColor: '#FF2D55',
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
     marginBottom: 8,
   },
-  secondaryBtnText: { color: '#00D2BE', fontWeight: '700' },
+  secondaryBtnText: { color: '#FF2D55', fontWeight: '700' },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   personChip: {
     flexDirection: 'row',
@@ -666,7 +666,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     maxWidth: '48%',
   },
-  personChipOn: { borderColor: '#00D2BE', backgroundColor: 'rgba(0,210,190,0.12)' },
+  personChipOn: { borderColor: '#FF2D55', backgroundColor: 'rgba(255, 45, 85,0.12)' },
   personChipAvatar: { width: 22, height: 22, borderRadius: 11 },
   personChipAvatarFallback: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#27272E' },
   personChipText: { color: '#F5F5F7', fontSize: 12, fontWeight: '600', flexShrink: 1 },
@@ -687,7 +687,7 @@ const styles = StyleSheet.create({
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: '#00D2BE',
+    backgroundColor: '#FF2D55',
     alignItems: 'center',
     justifyContent: 'center',
   },

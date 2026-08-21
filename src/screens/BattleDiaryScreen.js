@@ -287,7 +287,7 @@ const styles = StyleSheet.create({
     padding: responsiveSize(16),
     marginBottom: responsiveSize(20),
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.18)',
+    borderColor: 'rgba(255, 45, 85,0.18)',
   },
   headerTop: { flexDirection: 'row', alignItems: 'center', gap: responsiveSize(8), marginBottom: responsiveSize(14) },
   headerTitle: { color: COLORS.textPrimary, fontWeight: '800', fontSize: responsiveFont(15) },

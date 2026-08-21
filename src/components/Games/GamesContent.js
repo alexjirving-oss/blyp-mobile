@@ -26,10 +26,8 @@ const FRENEMIES_ENABLED = isFrenemiesEnabled();
 const REACTION_DUEL_ENABLED = isReactionDuelEnabled();
 const GRID9_ENABLED = isGrid9Enabled();
 
-const TEAL = '#00D2BE';
 const GOLD = '#F5C542';
 const GOLD_SOFT = '#FDE68A';
-const INK = '#0A0A0C';
 
 function formatPhase(phase) {
   switch (phase) {
@@ -99,7 +97,7 @@ function LiveGrid9Matches({ navigation, enabled }) {
         Each public match is listed so supporters can spectate and gift without taking a seat.
       </Text>
       {loading ? (
-        <ActivityIndicator color={TEAL} style={{ marginVertical: responsiveSize(12) }} />
+        <ActivityIndicator color={COLORS.primary} style={{ marginVertical: responsiveSize(12) }} />
       ) : null}
       {error ? <Text style={styles.liveGridError}>{error}</Text> : null}
       {!loading && !error && matches.length === 0 ? (
@@ -124,7 +122,7 @@ function LiveGrid9Matches({ navigation, enabled }) {
           </View>
           <View style={styles.spectateBtn}>
             <Text style={styles.spectateBtnText}>Spectate</Text>
-            <Icon name="chevron-forward" size={responsiveFont(14)} color={INK} />
+            <Icon name="chevron-forward" size={responsiveFont(14)} color={COLORS.white} />
           </View>
         </TouchableOpacity>
       ))}
@@ -158,7 +156,7 @@ function GameCard({ icon, title, badge, body, steps, ctaLabel, onCta, muted }) {
       {ctaLabel && onCta ? (
         <TouchableOpacity style={styles.cta} activeOpacity={0.85} onPress={onCta}>
           <Text style={styles.ctaText}>{ctaLabel}</Text>
-          <Icon name="chevron-forward" size={responsiveFont(16)} color="#0A0A0C" />
+          <Icon name="chevron-forward" size={responsiveFont(16)} color={COLORS.white} />
         </TouchableOpacity>
       ) : null}
     </View>
@@ -169,7 +167,7 @@ function FrenemiesHubCard({ enabled, onOpenLive, onHowItWorks }) {
   return (
     <View style={[styles.frenemiesWrap, !enabled && styles.cardMuted]}>
       <LinearGradient
-        colors={['#0E3D38', '#1A1520', '#0A0A0C']}
+        colors={['#1A0A10', '#121214', '#000000']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.frenemiesCard}
@@ -225,7 +223,7 @@ function FrenemiesHubCard({ enabled, onOpenLive, onHowItWorks }) {
               <Text style={styles.frenemiesOpenText} allowFontScaling={false}>
                 Open from Live
               </Text>
-              <Icon name="chevron-forward" size={responsiveFont(16)} color={INK} />
+              <Icon name="chevron-forward" size={responsiveFont(16)} color={COLORS.white} />
             </TouchableOpacity>
           </View>
         ) : null}
@@ -410,8 +408,8 @@ const styles = StyleSheet.create({
     padding: responsiveSize(14),
     borderRadius: responsiveSize(16),
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.28)',
-    backgroundColor: 'rgba(0,210,190,0.06)',
+    borderColor: 'rgba(255, 45, 85,0.28)',
+    backgroundColor: 'rgba(255, 45, 85,0.06)',
   },
   liveGridHeader: {
     flexDirection: 'row',
@@ -425,7 +423,7 @@ const styles = StyleSheet.create({
     fontSize: responsiveFont(16),
   },
   liveGridRefresh: {
-    color: TEAL,
+    color: COLORS.primary,
     fontWeight: '800',
     fontSize: responsiveFont(12),
   },
@@ -468,13 +466,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: TEAL,
+    backgroundColor: COLORS.primary,
     borderRadius: responsiveSize(10),
     paddingHorizontal: responsiveSize(10),
     paddingVertical: responsiveSize(8),
   },
   spectateBtnText: {
-    color: INK,
+    color: COLORS.white,
     fontWeight: '900',
     fontSize: responsiveFont(12),
   },
@@ -484,7 +482,7 @@ const styles = StyleSheet.create({
     padding: responsiveSize(16),
     marginBottom: responsiveSize(14),
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.22)',
+    borderColor: 'rgba(255, 45, 85,0.22)',
   },
   cardMuted: {
     borderColor: 'rgba(255,255,255,0.06)',
@@ -495,7 +493,7 @@ const styles = StyleSheet.create({
     width: responsiveSize(44),
     height: responsiveSize(44),
     borderRadius: responsiveSize(22),
-    backgroundColor: 'rgba(0,210,190,0.12)',
+    backgroundColor: 'rgba(255, 45, 85,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -539,7 +537,7 @@ const styles = StyleSheet.create({
     borderRadius: responsiveSize(12),
     paddingVertical: responsiveSize(12),
   },
-  ctaText: { color: '#0A0A0C', fontWeight: '800', fontSize: responsiveFont(14) },
+  ctaText: { color: COLORS.white, fontWeight: '800', fontSize: responsiveFont(14) },
   frenemiesWrap: {
     borderRadius: responsiveSize(18),
     overflow: 'hidden',
@@ -557,13 +555,13 @@ const styles = StyleSheet.create({
     marginBottom: responsiveSize(10),
   },
   frenemiesBadge: {
-    backgroundColor: TEAL,
+    backgroundColor: COLORS.primary,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 8,
   },
   frenemiesBadgeText: {
-    color: INK,
+    color: COLORS.white,
     fontWeight: '900',
     fontSize: responsiveFont(10),
     letterSpacing: 1,
@@ -601,8 +599,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     textAlign: 'center',
     lineHeight: responsiveSize(22),
-    backgroundColor: 'rgba(0,210,190,0.18)',
-    color: TEAL,
+    backgroundColor: 'rgba(255, 45, 85,0.18)',
+    color: COLORS.primary,
     fontWeight: '900',
     fontSize: responsiveFont(11),
   },
@@ -619,20 +617,20 @@ const styles = StyleSheet.create({
     paddingVertical: responsiveSize(11),
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.5)',
-    backgroundColor: 'rgba(0,210,190,0.12)',
+    borderColor: 'rgba(255, 45, 85,0.5)',
+    backgroundColor: 'rgba(255, 45, 85,0.12)',
   },
-  frenemiesRulesText: { color: TEAL, fontWeight: '900', fontSize: responsiveFont(14) },
+  frenemiesRulesText: { color: COLORS.primary, fontWeight: '900', fontSize: responsiveFont(14) },
   frenemiesOpenBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: responsiveSize(6),
-    backgroundColor: TEAL,
+    backgroundColor: COLORS.primary,
     borderRadius: responsiveSize(12),
     paddingVertical: responsiveSize(12),
   },
-  frenemiesOpenText: { color: INK, fontWeight: '900', fontSize: responsiveFont(14) },
+  frenemiesOpenText: { color: COLORS.white, fontWeight: '900', fontSize: responsiveFont(14) },
   lobbyCard: {
     alignItems: 'center',
     paddingVertical: responsiveSize(28),

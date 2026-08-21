@@ -295,7 +295,7 @@ const styles = StyleSheet.create({
     paddingVertical: responsiveSize(4),
     borderRadius: 999,
   },
-  poolText: { color: '#0A0A0C', fontWeight: '900', fontSize: responsiveFont(12) },
+  poolText: { color: '#FFFFFF', fontWeight: '900', fontSize: responsiveFont(12) },
   chipRow: { flexDirection: 'row', gap: responsiveSize(8), marginTop: responsiveSize(12) },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: responsiveSize(8), marginTop: responsiveSize(12) },
   chip: {

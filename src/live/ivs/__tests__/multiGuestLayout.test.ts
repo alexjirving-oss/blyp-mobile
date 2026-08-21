@@ -1,5 +1,6 @@
 import {
   LIVE_LAYOUT_MODES,
+  DEFAULT_LIVE_LAYOUT_MODE,
   buildStickyGuestSlots,
   buildVisibleGuestSlotIds,
   firstEmptyStickySlot,
@@ -10,6 +11,7 @@ import {
   resolveLiveLayoutMode,
   layoutUsesBottomTray,
   guestBoxesForLayout,
+  measureHostTop9WatchLayout,
   MAX_GUEST_SLOTS,
 } from '../multiGuestLayout';
 
@@ -52,7 +54,8 @@ describe('multiGuestLayout sticky slots', () => {
 
   it('normalizes layout modes and tray usage', () => {
     expect(normalizeLiveLayoutMode('equal_grid')).toBe(LIVE_LAYOUT_MODES.EQUAL_GRID);
-    expect(normalizeLiveLayoutMode('nope')).toBe(LIVE_LAYOUT_MODES.BOTTOM_GRID);
+    expect(normalizeLiveLayoutMode('nope')).toBe(LIVE_LAYOUT_MODES.HOST_TOP_9);
+    expect(DEFAULT_LIVE_LAYOUT_MODE).toBe(LIVE_LAYOUT_MODES.HOST_TOP_9);
     expect(layoutUsesBottomTray(LIVE_LAYOUT_MODES.BOTTOM_GRID)).toBe(true);
     expect(layoutUsesBottomTray(LIVE_LAYOUT_MODES.EQUAL_GRID)).toBe(false);
     expect(layoutUsesBottomTray(LIVE_LAYOUT_MODES.SOLO)).toBe(false);
@@ -71,6 +74,39 @@ describe('multiGuestLayout sticky slots', () => {
     expect(mapStudioLayoutToLiveLayoutMode('solo')).toBe(LIVE_LAYOUT_MODES.SOLO);
     expect(mapStudioLayoutToLiveLayoutMode('host-top-9')).toBe(LIVE_LAYOUT_MODES.HOST_TOP_9);
     expect(mapStudioLayoutToLiveLayoutMode('nope')).toBeNull();
+  });
+
+  it('treats an in-session Studio layout swap as the same Stage session (chrome only)', () => {
+    const before = resolveLiveLayoutMode({
+      studioLayout: 'solo',
+      guestLayoutMode: 'bottom_grid',
+    });
+    const after = resolveLiveLayoutMode({
+      studioLayout: 'host-top-9',
+      guestLayoutMode: 'solo',
+    });
+    expect(before).toBe(LIVE_LAYOUT_MODES.SOLO);
+    expect(after).toBe(LIVE_LAYOUT_MODES.HOST_TOP_9);
+    expect(before).not.toBe(after);
+  });
+
+  it('defaults a missing phone layout to host-top-9 so it matches Studio portrait', () => {
+    expect(normalizeLiveLayoutMode(undefined)).toBe(LIVE_LAYOUT_MODES.HOST_TOP_9);
+    expect(resolveLiveLayoutMode({})).toBe(LIVE_LAYOUT_MODES.HOST_TOP_9);
+    expect(mapStudioLayoutToLiveLayoutMode('host-top-9')).toBe(DEFAULT_LIVE_LAYOUT_MODE);
+  });
+
+  it('fits host 16:9 + 3x3 + chat into the measured header/footer window', () => {
+    const layout = measureHostTop9WatchLayout(360, 520);
+    expect(layout.hostH + layout.gridH + layout.chatH).toBe(520);
+    expect(layout.hostH).toBeLessThanOrEqual(Math.round(520 * 0.36));
+    expect(layout.gridH).toBeGreaterThan(0);
+    expect(layout.chatH).toBeGreaterThan(0);
+    const expanded = measureHostTop9WatchLayout(360, 520, { expanded: true });
+    expect(expanded.hostH).toBe(520);
+    expect(expanded.gridH).toBe(0);
+    expect(expanded.chatH).toBe(0);
+    expect(guestBoxesForLayout(LIVE_LAYOUT_MODES.HOST_TOP_9)).toBe(9);
   });
 
   it('lets Studio layout win over a stale phone guestLayoutMode', () => {

@@ -155,7 +155,7 @@ module.exports = () => {
     icon: './assets/icon.png',
     userInterfaceStyle: 'dark',
     splash: {
-      backgroundColor: '#0A0A0C',
+      backgroundColor: '#000000',
       image: './assets/splash.png',
       resizeMode: 'contain',
     },
@@ -176,7 +176,7 @@ module.exports = () => {
       edgeToEdgeEnabled: true,
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
-        backgroundColor: '#0A0A0C',
+        backgroundColor: '#000000',
       },
       package: 'com.blyp.mobile',
       // resize (not pan): with edge-to-edge, the window often won't shrink, but
@@ -243,7 +243,7 @@ module.exports = () => {
       [
         'expo-notifications',
         {
-          color: '#00D2BE',
+          color: '#FF2D55',
           sounds: ['./assets/sounds/blyp_notify.wav'],
           defaultChannel: 'blyp',
         },

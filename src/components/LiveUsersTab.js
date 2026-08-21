@@ -221,7 +221,7 @@ export default function LiveUsersTab() {
           activeOpacity={0.9}
           onPress={() => navigation.navigate('CreateBattle')}
         >
-          <Icon name="flash" size={18} color="#0A0A0C" />
+          <Icon name="flash" size={18} color="#FFFFFF" />
           <Text style={styles.prearrangeBtnText}>Prearrange a battle</Text>
         </TouchableOpacity>
         <Text style={styles.prearrangeHint}>Schedule vs a competitor with an optional forfeit stake</Text>
@@ -360,7 +360,7 @@ export default function LiveUsersTab() {
                 ) : null}
 
                 <TouchableOpacity style={styles.previewJoinBtn} onPress={() => joinLive(previewItem)} activeOpacity={0.9}>
-                  <Icon name="radio" size={18} color="#0A0A0C" />
+                  <Icon name="radio" size={18} color="#FFFFFF" />
                   <Text style={styles.previewJoinText}>Join live</Text>
                 </TouchableOpacity>
 
@@ -445,7 +445,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   prearrangeBtnText: {
-    color: '#0A0A0C',
+    color: '#FFFFFF',
     fontWeight: '800',
     fontSize: 15,
   },
@@ -465,7 +465,7 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 14,
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.28)',
+    borderColor: 'rgba(255,45,85,0.28)',
   },
   prearrangeBannerTitle: {
     color: '#fff',
@@ -656,7 +656,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.gradientEnd,
   },
   previewJoinText: {
-    color: '#0A0A0C',
+    color: '#FFFFFF',
     fontWeight: '800',
     fontSize: 16,
   },

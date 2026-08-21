@@ -3,28 +3,28 @@
  *
  * Flat token set mirroring designSystem/palettes.ts (darkScheme).
  * Prefer `useTheme()` from '../ThemeProvider' for reactive colours.
- * Keep in sync with darkScheme (warm night: charcoal + coral sparingly).
+ * Keep in sync with darkScheme (black canvas + pink #FF2D55).
  */
 
 export const COLORS = {
-    // ── Chrome + backgrounds (warm charcoal) ──────────────
-    chrome: '#12141A',                 // app chrome / header bg
-    page: '#12141A',                   // page / screen background
-    surface: '#1A1C24',                // raised surface for cards on dark bg
-    card: '#16181F',                   // card surface
-    border: 'rgba(236,234,240,0.12)',  // subtle border
-    divider: 'rgba(236,234,240,0.08)', // list dividers
+    // ── Chrome + backgrounds (true black) ──────────────
+    chrome: '#000000',
+    page: '#000000',
+    surface: '#141416',
+    card: '#121214',
+    border: 'rgba(236,234,240,0.12)',
+    divider: 'rgba(236,234,240,0.08)',
 
-    // ── Text (warm fog / muted) ───────────────────────────
-    textPrimary: '#ECEAF0',
-    textSecondary: '#9A97A6',
-    textMuted: '#9A97A6',
-    textDisabled: '#6B6878',
+    // ── Text ──────────────────────────────────────────
+    textPrimary: '#FFFFFF',
+    textSecondary: '#A1A1AA',
+    textMuted: '#8E8E93',
+    textDisabled: '#636366',
 
-    // ── Brand accent (coral — sparingly) ──────────────────
-    brandA: '#FF4D6D',
-    brandB: '#FF4D6D',
-    brandC: '#E83D5C',
+    // ── Brand accent (pink — sparingly) ───────────────
+    brandA: '#FF2D55',
+    brandB: '#FF2D55',
+    brandC: '#E01E45',
 
     // ── Secondary (warm taupe; demoted off neon cyan) ─────
     electric: '#C4B5A5',

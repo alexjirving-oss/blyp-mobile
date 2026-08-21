@@ -51,7 +51,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.08)',
   },
   backText: {
-    color: '#00D2BE',
+    color: '#FF2D55',
     fontSize: 15,
     fontWeight: '600',
   },

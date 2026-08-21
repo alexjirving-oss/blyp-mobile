@@ -6,8 +6,8 @@ import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import Svg, { Circle, G, Path, Defs, LinearGradient, Stop } from 'react-native-svg';
 
-const TEAL = '#00D2BE';
-const TEAL_DIM = '#00A89E';
+const TEAL = '#FF2D55';
+const TEAL_DIM = '#E01E45';
 const TEAL_DEEP = '#0A6B62';
 const TEAL_INK = '#0B2F2C';
 const GOLD = '#F5C542';
@@ -81,7 +81,7 @@ export default function FrenemiesWheelGlyph({ size = 44 }) {
           cy={cy}
           r={rOuter + size * 0.012}
           fill="none"
-          stroke="rgba(0,210,190,0.35)"
+          stroke="rgba(255,45,85,0.35)"
           strokeWidth={size * 0.018}
         />
 

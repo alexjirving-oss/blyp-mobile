@@ -563,7 +563,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 999,
-    backgroundColor: 'rgba(0,210,190,0.15)',
+    backgroundColor: 'rgba(255, 45, 85,0.15)',
   },
   plusPillText: {
     fontSize: responsiveFont(11),

@@ -440,9 +440,9 @@ const styles = StyleSheet.create({
     marginTop: responsiveSize(10),
     padding: responsiveSize(12),
     borderRadius: responsiveSize(12),
-    backgroundColor: 'rgba(0,210,190,0.08)',
+    backgroundColor: 'rgba(255, 45, 85,0.08)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.2)',
+    borderColor: 'rgba(255, 45, 85,0.2)',
   },
   introBannerText: { flex: 1, color: COLORS.textPrimary, fontSize: responsiveFont(13), lineHeight: responsiveFont(18) },
   emptyAmbassadorBanner: {
@@ -472,7 +472,7 @@ const styles = StyleSheet.create({
     paddingVertical: responsiveSize(8),
     paddingHorizontal: responsiveSize(12),
     borderRadius: responsiveSize(20),
-    backgroundColor: 'rgba(0,210,190,0.10)',
+    backgroundColor: 'rgba(255, 45, 85,0.10)',
   },
   dutyBtnText: { color: COLORS.primary, fontWeight: '700', fontSize: responsiveFont(12) },
   modalBackdrop: {
@@ -516,7 +516,7 @@ const styles = StyleSheet.create({
     minWidth: responsiveSize(64),
     alignItems: 'center',
   },
-  modalSaveText: { color: '#0A0A0C', fontWeight: '800', fontSize: responsiveFont(14) },
+  modalSaveText: { color: '#FFFFFF', fontWeight: '800', fontSize: responsiveFont(14) },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: responsiveSize(10) },
   loadingText: { color: COLORS.textSecondary, fontSize: responsiveFont(13) },
   grid: {
@@ -538,9 +538,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
   },
-  tileActive: { borderColor: 'rgba(0,210,190,0.4)' },
+  tileActive: { borderColor: 'rgba(255, 45, 85,0.4)' },
   tileEmpty: { borderStyle: 'dashed', borderColor: 'rgba(255,255,255,0.12)' },
-  tileEmptyJoin: { borderStyle: 'dashed', borderColor: 'rgba(0,210,190,0.5)', backgroundColor: 'rgba(0,210,190,0.06)' },
+  tileEmptyJoin: { borderStyle: 'dashed', borderColor: 'rgba(255, 45, 85,0.5)', backgroundColor: 'rgba(255, 45, 85,0.06)' },
   joinPlus: {
     width: responsiveSize(44),
     height: responsiveSize(44),
@@ -549,7 +549,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  joinPlusText: { color: '#0A0A0C', fontSize: responsiveFont(26), fontWeight: '800', lineHeight: responsiveFont(28) },
+  joinPlusText: { color: '#FFFFFF', fontSize: responsiveFont(26), fontWeight: '800', lineHeight: responsiveFont(28) },
   joinLabel: { color: COLORS.primary, fontWeight: '700', fontSize: responsiveFont(13), marginTop: responsiveSize(6) },
   avatarFallback: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: responsiveSize(8) },
   avatarCircle: {
@@ -604,7 +604,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: responsiveSize(24),
     flex: 1,
   },
-  primaryBtnText: { color: '#0A0A0C', fontWeight: '800', fontSize: responsiveFont(15) },
+  primaryBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: responsiveFont(15) },
   leaveBtn: { backgroundColor: 'rgba(239,68,68,0.15)', flex: 0, paddingHorizontal: responsiveSize(18) },
   leaveBtnText: { color: '#ef4444', fontWeight: '800', fontSize: responsiveFont(14) },
   watchingPill: {

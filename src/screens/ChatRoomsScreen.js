@@ -377,7 +377,7 @@ const ChatRoomsScreen = ({ navigation }) => {
   const renderSectionHeader = (title, icon, count = null) => (
     <View style={styles.sectionHeader}>
       <View style={styles.sectionHeaderLeft}>
-        <Icon name={icon} size={24} color="#00D2BE" />
+        <Icon name={icon} size={24} color="#FF2D55" />
         <Text style={styles.sectionTitle}>{title}</Text>
         {count !== null && (
           <View style={styles.countBadge}>
@@ -427,7 +427,7 @@ const ChatRoomsScreen = ({ navigation }) => {
             style={styles.createButton}
             onPress={() => setShowCreateModal(true)}
           >
-            <LinearGradient colors={['#00D2BE', '#00A89E']} style={styles.createButtonGradient}>
+            <LinearGradient colors={['#FF2D55', '#E01E45']} style={styles.createButtonGradient}>
               <Icon name="add" size={24} color="#0A0A0C" />
             </LinearGradient>
           </TouchableOpacity>
@@ -455,8 +455,8 @@ const ChatRoomsScreen = ({ navigation }) => {
             <RefreshControl
               refreshing={loading}
               onRefresh={loadRooms}
-              tintColor="#00D2BE"
-              colors={['#00D2BE']}
+              tintColor="#FF2D55"
+              colors={['#FF2D55']}
             />
           }
         >
@@ -576,7 +576,7 @@ const ChatRoomsScreen = ({ navigation }) => {
                   <Switch
                     value={isPrivate}
                     onValueChange={setIsPrivate}
-                    trackColor={{ false: '#374151', true: '#00D2BE' }}
+                    trackColor={{ false: '#374151', true: '#FF2D55' }}
                     thumbColor="#fff"
                   />
                 </View>
@@ -715,17 +715,17 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   countBadge: {
-    backgroundColor: 'rgba(0, 210, 190, 0.16)',
+    backgroundColor: 'rgba(255, 45, 85, 0.16)',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#00D2BE',
+    borderColor: '#FF2D55',
   },
   countText: {
     fontSize: 12,
     fontWeight: 'bold',
-    color: '#00D2BE',
+    color: '#FF2D55',
   },
   emptySection: {
     alignItems: 'center',
@@ -778,7 +778,7 @@ const styles = StyleSheet.create({
   },
   categoryChipActive: {
     backgroundColor: 'transparent',
-    borderColor: '#00D2BE',
+    borderColor: '#FF2D55',
   },
   categoryChipText: {
     fontSize: 12,
@@ -786,7 +786,7 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
   },
   categoryChipTextActive: {
-    color: '#00D2BE',
+    color: '#FF2D55',
   },
   roomsList: {
     paddingHorizontal: 10,
@@ -923,7 +923,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   tag: {
-    backgroundColor: 'rgba(0, 210, 190, 0.12)',
+    backgroundColor: 'rgba(255, 45, 85, 0.12)',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
@@ -932,7 +932,7 @@ const styles = StyleSheet.create({
   },
   tagText: {
     fontSize: 10,
-    color: '#00D2BE',
+    color: '#FF2D55',
     fontWeight: 'bold',
   },
   moreTags: {
@@ -984,7 +984,7 @@ const styles = StyleSheet.create({
   modalCreate: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#00D2BE',
+    color: '#FF2D55',
   },
   modalCreateDisabled: {
     opacity: 0.5,
@@ -1036,7 +1036,7 @@ const styles = StyleSheet.create({
   },
   categoryOptionActive: {
     backgroundColor: 'transparent',
-    borderColor: '#00D2BE',
+    borderColor: '#FF2D55',
   },
   categoryOptionText: {
     fontSize: 14,
@@ -1044,7 +1044,7 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
   },
   categoryOptionTextActive: {
-    color: '#00D2BE',
+    color: '#FF2D55',
   },
 });
 

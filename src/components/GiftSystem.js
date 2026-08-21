@@ -75,7 +75,7 @@ function CoinMark({ size = 12, style }) {
     >
       <Text
         style={{
-          color: '#0A0A0C',
+          color: '#FFFFFF',
           fontSize: Math.max(7, Math.round(size * 0.62)),
           fontWeight: '900',
           lineHeight: Math.max(8, Math.round(size * 0.7)),
@@ -911,10 +911,10 @@ const GiftSystem = ({
   const getRarityColor = (rarity) => {
     // Blyp Gift Motion palette — teal/sport energy; gold only on legendary.
     const colors = {
-      common: ['#3F3F46', '#00A89E', '#00D2BE'],
-      rare: ['#0E7490', '#00D2BE', '#F59E0B'],
+      common: ['#3F3F46', '#E01E45', '#FF2D55'],
+      rare: ['#0E7490', '#FF2D55', '#F59E0B'],
       epic: ['#0E7490', '#A5F3FC', '#7FEDE2'],
-      legendary: ['#92400E', '#FBBF24', '#00D2BE'],
+      legendary: ['#92400E', '#FBBF24', '#FF2D55'],
     };
     return colors[rarity] || colors.common;
   };
@@ -1538,9 +1538,9 @@ const styles = StyleSheet.create({
   creatorInfo: {
     paddingHorizontal: 14,
     paddingVertical: 9,
-    backgroundColor: 'rgba(0,210,190,0.08)',
+    backgroundColor: 'rgba(255, 45, 85,0.08)',
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0,210,190,0.18)',
+    borderBottomColor: 'rgba(255, 45, 85,0.18)',
   },
   recipientLabel: {
     color: '#7FEDE2',
@@ -1640,7 +1640,7 @@ const styles = StyleSheet.create({
     borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#00D2BE',
+    backgroundColor: '#FF2D55',
     borderWidth: 2,
     borderColor: '#fff',
     zIndex: 22,
@@ -1777,7 +1777,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(251,191,36,0.54)',
   },
   giftPriceRowSelected: {
-    backgroundColor: 'rgba(0,210,190,0.18)',
+    backgroundColor: 'rgba(255, 45, 85,0.18)',
     borderColor: '#7FEDE2',
   },
   giftName: {

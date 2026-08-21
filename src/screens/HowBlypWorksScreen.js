@@ -116,7 +116,7 @@ const styles = StyleSheet.create({
   intro: { color: COLORS.textSecondary, fontSize: responsiveFont(14), lineHeight: responsiveFont(20), marginVertical: 12 },
 
   row: { flexDirection: 'row', gap: 12, marginBottom: 18 },
-  iconWrap: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(0,210,190,0.12)', alignItems: 'center', justifyContent: 'center' },
+  iconWrap: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255, 45, 85,0.12)', alignItems: 'center', justifyContent: 'center' },
   rowText: { flex: 1 },
   rowTitle: { color: COLORS.textPrimary, fontSize: responsiveFont(15), fontWeight: '800', marginBottom: 3 },
   rowBody: { color: COLORS.textSecondary, fontSize: responsiveFont(13), lineHeight: responsiveFont(19) },
