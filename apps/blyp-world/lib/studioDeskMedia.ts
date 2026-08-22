@@ -5,6 +5,8 @@
  * Does not replace ivsWebHost — callers pass publishStream into startIvsWebHostPublish.
  */
 
+import { getBlypDesktopBridge } from "@/lib/blypDesktopBridge";
+
 export type DeskMediaMode = "camera" | "screen" | "screen-pip" | "camera-pip";
 export type DeskOrientation = "landscape" | "portrait";
 
@@ -722,12 +724,47 @@ type DisplayMediaOptions = DisplayMediaStreamOptions & {
 };
 
 /**
+ * Electron desktop shell: desktopCapturer + getUserMedia(chromeMediaSource).
+ * Avoids Chrome's getDisplayMedia "sharing this tab" banner.
+ */
+async function getElectronDisplayMedia(
+  options: DisplayMediaStreamOptions,
+): Promise<MediaStream> {
+  const bridge = getBlypDesktopBridge();
+  if (!bridge) {
+    throw new Error("Desktop screen capture bridge is not available");
+  }
+
+  const wantsAudio =
+    options.audio === true ||
+    (typeof options.audio === "object" && options.audio !== null);
+
+  const stream = await bridge.pickScreen({
+    audio: wantsAudio,
+    video: options.video ?? true,
+  });
+  prepareDisplayAudioTracks(stream);
+
+  try {
+    window.focus();
+  } catch {
+    /* ignore */
+  }
+
+  return rememberDeskScreenStream(stream);
+}
+
+/**
  * Screen/tab capture that keeps focus on Live Studio.
  * Chrome otherwise jumps to the shared Chrome tab after Share.
  */
 async function getDisplayMediaStayInStudio(
   options: DisplayMediaStreamOptions,
 ): Promise<MediaStream> {
+  if (getBlypDesktopBridge()) {
+    return getElectronDisplayMedia(options);
+  }
+
   const devices = requireDevices();
   if (typeof devices.getDisplayMedia !== "function") {
     throw new Error("Screen share is not available in this browser");
