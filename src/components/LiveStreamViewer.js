@@ -227,7 +227,7 @@ const IVSLiveStreamViewer = ({
   // Guest's own media preferences (honored unless host has forced mute/cam-off).
   const [selfMicOn, setSelfMicOn] = useState(true);
   const [selfCamOn, setSelfCamOn] = useState(true);
-  const [guestSpeakerOn, setGuestSpeakerOn] = useState(false);
+  const [guestSpeakerOn, setGuestSpeakerOn] = useState(true);
   const selfMicOnRef = useRef(true);
   const selfCamOnRef = useRef(true);
   const [selfPhotoUrl, setSelfPhotoUrl] = useState(null);
@@ -811,7 +811,16 @@ const IVSLiveStreamViewer = ({
       });
 
       await Promise.race([startPromise, timeoutPromise]);
-      // Speaker stays off (earpiece) until the guest taps the Speaker button.
+      // Guest's own phone: loudspeaker on join. Do not applyCallEarpiece here.
+      setGuestSpeakerOn(true);
+      try {
+        await applyGuestLiveSpeaker(true);
+        if (typeof nativeClient.forceLiveLoudspeaker === 'function') {
+          await nativeClient.forceLiveLoudspeaker('guest-start');
+        }
+      } catch {
+        /* Native IVS watchdog still owns the route. */
+      }
 
       guestModeRef.current = true;
       setGuestMode(true);
